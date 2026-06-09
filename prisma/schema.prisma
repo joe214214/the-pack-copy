@@ -1,0 +1,420 @@
+// ThePack — AI Agent Marketplace
+// Prisma Schema — All core entities for MVP
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  PUBLISHER
+  AGENT_OWNER
+  ADMIN
+}
+
+enum AgentStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum TaskType {
+  CONTENT_WRITING
+  CONTENT_EDITING
+  DATA_EXTRACTION
+  REPORT_GENERATION
+  TRANSLATION
+  SUMMARIZATION
+  FORMATTING
+  TEMPLATE_FILLING
+}
+
+enum TaskStatus {
+  DRAFT
+  OPEN
+  MATCHED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderStatus {
+  CREATED
+  FUNDED
+  EXECUTING
+  REVIEW
+  ACCEPTED
+  DISPUTED
+  SETTLED
+  REFUNDED
+  CANCELLED
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+}
+
+enum SettlementStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+}
+
+enum DisputeStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+}
+
+enum CreditTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+}
+
+// ============================================================================
+// USER  
+// ============================================================================
+
+model User {
+  id             String     @id @default(cuid())
+  supabaseId     String     @unique @map("supabase_id")
+  email          String     @unique
+  name           String
+  avatarUrl      String?    @map("avatar_url")
+  roles          UserRole[] @default([PUBLISHER])
+  balance        Decimal    @default(0) @db.Decimal(12, 2)
+  frozenBalance  Decimal    @default(0) @map("frozen_balance") @db.Decimal(12, 2)
+  isBanned       Boolean    @default(false) @map("is_banned")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  ownedAgents    Agent[]          @relation("AgentOwner")
+  publishedTasks Task[]           @relation("TaskPublisher")
+  orders         Order[]          @relation("OrderPublisher")
+  reviews        Review[]         @relation("ReviewAuthor")
+  raisedDisputes Dispute[]        @relation("DisputeRaiser")
+  auditLogs      AuditLog[]       @relation("AuditLogActor")
+
+  @@map("users")
+}
+
+// ============================================================================
+// AGENT
+// ============================================================================
+
+model Agent {
+  id                 String       @id @default(cuid())
+  ownerId            String       @map("owner_id")
+  name               String
+  slug               String       @unique
+  description        String       @db.Text
+  avatarUrl          String?      @map("avatar_url")
+  status             AgentStatus  @default(PENDING)
+  supportedTaskTypes TaskType[]   @map("supported_task_types")
+  sampleOutputs      Json?        @map("sample_outputs")
+  modelInfo          String?      @map("model_info")
+  executionEndpoint  String?      @map("execution_endpoint")
+  dockerImage        String?      @map("docker_image")
+  
+  // Pricing
+  basePrice          Decimal      @default(0) @map("base_price") @db.Decimal(10, 2)
+  pricePerToken      Decimal?     @map("price_per_token") @db.Decimal(10, 6)
+  
+  // Performance metrics (denormalized for fast reads)
+  avgCost            Decimal      @default(0) @map("avg_cost") @db.Decimal(10, 2)
+  avgDurationSecs    Int          @default(0) @map("avg_duration_secs")
+  successRate        Decimal      @default(0) @map("success_rate") @db.Decimal(5, 4)
+  avgRating          Decimal      @default(0) @map("avg_rating") @db.Decimal(3, 2)
+  completedOrders    Int          @default(0) @map("completed_orders")
+  totalOrders        Int          @default(0) @map("total_orders")
+  
+  // Credit
+  creditScore        Decimal      @default(0) @map("credit_score") @db.Decimal(5, 4)
+  creditTier         CreditTier   @default(BRONZE) @map("credit_tier")
+
+  // === MCP Gateway Fields ===
+  connectionType     String       @default("MCP") @map("connection_type")       // "MCP" | "WEBHOOK" | "OPENCLAW" | "COZE"
+  apiKey             String?      @unique @map("api_key")                       // Agent API Key for gateway auth
+  heartbeatInterval  Int          @default(30) @map("heartbeat_interval")       // Heartbeat interval in seconds
+  lastHeartbeat      DateTime?    @map("last_heartbeat")                        // Last heartbeat timestamp
+  isOnline           Boolean      @default(false) @map("is_online")             // Whether agent is currently online
+  autoAccept         Boolean      @default(false) @map("auto_accept")           // Auto-accept incoming tasks
+  acceptTaskTypes    TaskType[]   @map("accept_task_types")                     // Task type filter for auto-accept
+  dailyLimit         Int          @default(10) @map("daily_limit")              // Max orders per day
+  dailyCompleted     Int          @default(0) @map("daily_completed")           // Orders completed today
+  
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  owner              User         @relation("AgentOwner", fields: [ownerId], references: [id])
+  orders             Order[]      @relation("OrderAgent")
+  creditRecords      CreditRecord[] @relation("AgentCreditRecords")
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([creditTier])
+  @@index([apiKey])
+  @@map("agents")
+}
+
+// ============================================================================
+// TASK
+// ============================================================================
+
+model Task {
+  id             String     @id @default(cuid())
+  publisherId    String     @map("publisher_id")
+  type           TaskType
+  title          String
+  description    String     @db.Text
+  
+  // Structured input
+  inputSchema    Json?      @map("input_schema")
+  inputFiles     Json?      @map("input_files")      // Array of { name, url, size, type }
+  
+  // Requirements
+  budget         Decimal    @db.Decimal(10, 2)
+  deadlineHours  Int        @map("deadline_hours")
+  outputFormat   String?    @map("output_format")     // Expected output format description
+  qualityCriteria Json?     @map("quality_criteria")  // Auto-validation rules
+  
+  status         TaskStatus @default(DRAFT)
+  
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+  expiresAt      DateTime?  @map("expires_at")
+
+  // Relations
+  publisher      User       @relation("TaskPublisher", fields: [publisherId], references: [id])
+  order          Order?     @relation("TaskOrder")
+
+  @@index([publisherId])
+  @@index([status])
+  @@index([type])
+  @@map("tasks")
+}
+
+// ============================================================================
+// ORDER — The transactional core
+// ============================================================================
+
+model Order {
+  id             String      @id @default(cuid())
+  taskId         String      @unique @map("task_id")
+  agentId        String      @map("agent_id")
+  publisherId    String      @map("publisher_id")
+  
+  // Pricing
+  price          Decimal     @db.Decimal(10, 2)
+  platformFee    Decimal     @map("platform_fee") @db.Decimal(10, 2)
+  escrowAmount   Decimal     @map("escrow_amount") @db.Decimal(10, 2)
+  
+  // Payment reference (Stripe-ready)
+  paymentIntentId String?    @map("payment_intent_id")
+  paymentMethod   String     @default("BALANCE") @map("payment_method") // BALANCE | STRIPE
+  
+  status         OrderStatus @default(CREATED)
+  deadline       DateTime
+  
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  task           Task        @relation("TaskOrder", fields: [taskId], references: [id])
+  agent          Agent       @relation("OrderAgent", fields: [agentId], references: [id])
+  publisher      User        @relation("OrderPublisher", fields: [publisherId], references: [id])
+  execution      Execution?  @relation("OrderExecution")
+  review         Review?     @relation("OrderReview")
+  settlement     Settlement? @relation("OrderSettlement")
+  disputes       Dispute[]   @relation("OrderDisputes")
+  creditRecord   CreditRecord? @relation("OrderCreditRecord")
+
+  @@index([agentId])
+  @@index([publisherId])
+  @@index([status])
+  @@map("orders")
+}
+
+// ============================================================================
+// EXECUTION — Sandbox execution record
+// ============================================================================
+
+model Execution {
+  id             String          @id @default(cuid())
+  orderId        String          @unique @map("order_id")
+  sandboxId      String?         @map("sandbox_id")    // Docker container ID (legacy)
+  containerId    String?         @map("container_id")   // Docker container ID (legacy)
+  
+  // Execution details
+  logs           Json?                                   // Structured log entries
+  outputFiles    Json?           @map("output_files")    // Array of { name, url, size, type }
+  exitCode       Int?            @map("exit_code")
+  errorMessage   String?         @map("error_message") @db.Text
+  
+  // Resource usage
+  cpuUsageSecs   Decimal?        @map("cpu_usage_secs") @db.Decimal(10, 2)
+  memoryPeakMb   Int?            @map("memory_peak_mb")
+
+  // === Remote Execution Fields ===
+  executionSource  String?       @default("MCP") @map("execution_source")    // "LOCAL" | "MCP" | "OPENCLAW" | "COZE"
+  remoteSessionId  String?       @map("remote_session_id")                   // Remote session ID from agent platform
+  heartbeatStatus  String?       @default("ALIVE") @map("heartbeat_status")  // "ALIVE" | "STALE" | "DEAD"
+  lastHeartbeatAt  DateTime?     @map("last_heartbeat_at")                   // Execution-level heartbeat
+  
+  status         ExecutionStatus @default(PENDING)
+  startedAt      DateTime?       @map("started_at")
+  completedAt    DateTime?       @map("completed_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  order          Order           @relation("OrderExecution", fields: [orderId], references: [id])
+
+  @@index([status])
+  @@map("executions")
+}
+
+// ============================================================================
+// REVIEW — Auto + Manual review
+// ============================================================================
+
+model Review {
+  id             String   @id @default(cuid())
+  orderId        String   @unique @map("order_id")
+  reviewerId     String?  @map("reviewer_id")
+  
+  // Auto review
+  autoChecks     Json?    @map("auto_checks")    // Array of { check, passed, details }
+  autoPassed     Boolean? @map("auto_passed")
+  autoScore      Decimal? @map("auto_score") @db.Decimal(5, 4)
+  
+  // User review
+  userAccepted   Boolean? @map("user_accepted")
+  userRating     Int?     @map("user_rating")     // 1-5
+  userComment    String?  @map("user_comment") @db.Text
+  
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  order          Order    @relation("OrderReview", fields: [orderId], references: [id])
+  reviewer       User?    @relation("ReviewAuthor", fields: [reviewerId], references: [id])
+
+  @@map("reviews")
+}
+
+// ============================================================================
+// SETTLEMENT — Financial settlement
+// ============================================================================
+
+model Settlement {
+  id               String           @id @default(cuid())
+  orderId          String           @unique @map("order_id")
+  
+  totalAmount      Decimal          @map("total_amount") @db.Decimal(10, 2)
+  platformFee      Decimal          @map("platform_fee") @db.Decimal(10, 2)
+  agentPayout      Decimal          @map("agent_payout") @db.Decimal(10, 2)
+  
+  // Stripe-ready fields
+  stripeTransferId String?          @map("stripe_transfer_id")
+  
+  status           SettlementStatus @default(PENDING)
+  settledAt        DateTime?        @map("settled_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  order            Order            @relation("OrderSettlement", fields: [orderId], references: [id])
+
+  @@map("settlements")
+}
+
+// ============================================================================
+// CREDIT RECORD — Per-order credit data for agents
+// ============================================================================
+
+model CreditRecord {
+  id               String   @id @default(cuid())
+  agentId          String   @map("agent_id")
+  orderId          String   @unique @map("order_id")
+  
+  successScore     Decimal  @map("success_score") @db.Decimal(5, 4)     // 0 or 1
+  timelinessScore  Decimal  @map("timeliness_score") @db.Decimal(5, 4)  // 0-1
+  qualityScore     Decimal  @map("quality_score") @db.Decimal(5, 4)     // 0-1
+  ratingScore      Decimal  @map("rating_score") @db.Decimal(5, 4)      // normalized user rating
+  
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relations
+  agent            Agent    @relation("AgentCreditRecords", fields: [agentId], references: [id])
+  order            Order    @relation("OrderCreditRecord", fields: [orderId], references: [id])
+
+  @@index([agentId])
+  @@map("credit_records")
+}
+
+// ============================================================================
+// DISPUTE
+// ============================================================================
+
+model Dispute {
+  id             String        @id @default(cuid())
+  orderId        String        @map("order_id")
+  raisedById     String        @map("raised_by_id")
+  
+  reason         String        @db.Text
+  evidence       Json?                                 // Array of { type, url, description }
+  status         DisputeStatus @default(OPEN)
+  resolution     String?       @db.Text
+  resolvedById   String?       @map("resolved_by_id")
+  
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  resolvedAt     DateTime?     @map("resolved_at")
+
+  // Relations
+  order          Order         @relation("OrderDisputes", fields: [orderId], references: [id])
+  raisedBy       User          @relation("DisputeRaiser", fields: [raisedById], references: [id])
+
+  @@index([orderId])
+  @@index([status])
+  @@map("disputes")
+}
+
+// ============================================================================
+// AUDIT LOG — Platform governance
+// ============================================================================
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  actorId        String?  @map("actor_id")
+  action         String                          // e.g., "agent.suspend", "order.refund"
+  entityType     String   @map("entity_type")    // e.g., "agent", "order", "user"
+  entityId       String   @map("entity_id")
+  details        Json?
+  ipAddress      String?  @map("ip_address")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  actor          User?    @relation("AuditLogActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
