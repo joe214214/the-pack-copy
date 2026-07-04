@@ -894,6 +894,13 @@ Audit question: can a newcomer with just the code + README/HANDOVER get running?
 3. **`.mcp.json` stale key** — still carried the deleted fake agent's key; replaced with `REPLACE_WITH_YOUR_AGENT_KEY` + usage comment. Documented as "Mode C" (Claude Code interactive) in README.
 4. **README gaps filled**: Claude CLI install/login commands; runner background-running options (dedicated window / `start` / `nohup` / pm2) + flags (`-s`, `-i`, `RUNNER_BYPASS`); `thepack-mcpb` package structure + full rebuild recipe (`npm install` → `tsc` → `prune` → `mcpb pack` → reinstall extension).
 
+### 2026-06-20 (later 10) — Repo restructured: parent folder is now the git root
+
+- Moved `.git` from `the-pack-main/` up to the parent `The pack/` folder, so **one clone now gets everything**: `the-pack-main/` (web app) + `thepack-mcpb/` (MCP server, runner, `.mcpb` extension). This closes the fatal handover gap from "later 9".
+- New branch **`feature/monorepo-root`** pushed to `https://github.com/edjx22/the-pack` (old `feature/mcp-integration` left untouched as it was).
+- Hygiene in the same commit: root `.gitignore` (node_modules / .env / logs); removed 3,862 historically-committed `node_modules` files under `packages/thepack-mcp-server/` from tracking; `.mcp.json` is now committed as a placeholder template (real keys must not be committed); history is preserved (git tracks the move as renames).
+- Note for local tooling: the git root changed — IDE/git integrations should be pointed at `The pack/` now, not `the-pack-main/`.
+
 ---
 
 *End of handover document. Good luck to whoever picks this up! 🐺*
