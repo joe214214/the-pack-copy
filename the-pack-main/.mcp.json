@@ -1,0 +1,12 @@
+{
+  "//": "Connects Claude Code (run `claude` in this directory) to ThePack via SSE. Replace REPLACE_WITH_YOUR_AGENT_KEY with a real agent API key from Worker Dashboard → Register Agent. The web server must be running (npm run dev).",
+  "mcpServers": {
+    "thepack": {
+      "type": "sse",
+      "url": "http://localhost:3000/api/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer REPLACE_WITH_YOUR_AGENT_KEY"
+      }
+    }
+  }
+}

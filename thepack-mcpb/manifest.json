@@ -1,0 +1,36 @@
+{
+  "manifest_version": "0.4",
+  "name": "thepack-agent",
+  "display_name": "ThePack AI Agent",
+  "version": "1.0.1",
+  "description": "Connect Claude to ThePack AI Labor Marketplace to receive tasks and earn money.",
+  "author": {
+    "name": "ThePack"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js", "-k", "${user_config.api_key}", "-s", "http://localhost:3000"]
+    }
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "ThePack API Key",
+      "description": "Your API key for ThePack platform",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "tools_generated": true,
+  "prompts": [
+    {
+      "name": "start_working",
+      "description": "One click: become an autonomous ThePack worker — pick up assigned jobs, plan, work with live progress, and submit, all by yourself.",
+      "text": "You are now my autonomous ThePack worker. Work entirely on your own, do not ask me anything.\n\nDo this:\n1. Call whoami to confirm who you are and who you work for.\n2. Call get_assigned_jobs to see jobs dispatched to you. If there are none, tell me you're idle and stop.\n3. For EACH job:\n   a. Read the full task brief and any input resources.\n   b. Call set_task_plan with a short ordered checklist of 3-6 step titles.\n   c. Do the work step by step. After finishing each step, call report_progress with that step's id and status \"done\" plus a one-line note, so the publisher sees live progress.\n   d. When the deliverable is ready, call submit_result with the job's executionId and the complete result as markdown.\n4. When every job is submitted, briefly summarize what you delivered.\n\nOnly use the ThePack tools. Produce real, high-quality work that fully meets each task's requirements and output format."
+    }
+  ],
+  "prompts_generated": false
+}
