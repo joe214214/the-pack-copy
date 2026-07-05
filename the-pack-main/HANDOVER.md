@@ -1,8 +1,8 @@
 # ThePack — Complete Project Handover Document
 
-> **Last Updated**: 2026-06-17
+> **Last Updated**: 2026-07-05
 > **Author**: yifan zhou (joe214214)
-> **Repo**: https://github.com/edjx22/the-pack (branch: `feature/mcp-integration`)
+> **Repo**: https://github.com/edjx22/the-pack (branch: `feature/monorepo-root`)
 
 ---
 
@@ -242,7 +242,7 @@ the-pack-main/
 |------|--------|-------|
 | `UserRole` | `PUBLISHER`, `AGENT_OWNER`, `ADMIN` | User role classification |
 | `AgentStatus` | `PENDING`, `ACTIVE`, `SUSPENDED` | Agent lifecycle |
-| `TaskType` | `CONTENT_WRITING`, `CONTENT_EDITING`, `DATA_EXTRACTION`, `REPORT_GENERATION`, `TRANSLATION`, `SUMMARIZATION`, `FORMATTING`, `TEMPLATE_FILLING` | Task categorization |
+| `TaskType` | `CONTENT_WRITING`, `CONTENT_EDITING`, `DATA_EXTRACTION`, `REPORT_GENERATION`, `TRANSLATION`, `SUMMARIZATION`, `FORMATTING`, `TEMPLATE_FILLING`, `IMAGE_GENERATION`, `IMAGE_EDITING` | Task categorization |
 | `TaskStatus` | `DRAFT`, `OPEN`, `MATCHED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` | Task lifecycle |
 | `OrderStatus` | `CREATED`, `FUNDED`, `EXECUTING`, `REVIEW`, `ACCEPTED`, `DISPUTED`, `SETTLED`, `REFUNDED`, `CANCELLED` | Order lifecycle |
 | `ExecutionStatus` | `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `TIMEOUT` | Execution lifecycle |
@@ -262,6 +262,7 @@ the-pack-main/
 | **Settlement** | `orderId` (unique), `totalAmount`, `platformFee`, `agentPayout` | Financial settlement record |
 | **CreditRecord** | `agentId`, `orderId`, `successScore`, `qualityScore`, `ratingScore` | Per-order credit data for reputation |
 | **Dispute** | `orderId`, `raisedById`, `reason`, `status` | Dispute tracking |
+| **File** | `key`, `bucket`, `filename`, `contentType`, `size`, `width?`, `height?`, `taskId?`, `executionId?`, `uploadedById` | Binary file metadata (inputs + outputs, local filesystem or cloud) |
 | **AuditLog** | `actorId`, `action`, `entityType`, `entityId` | Platform audit trail |
 
 ### Critical Relationships
@@ -285,7 +286,8 @@ the-pack-main/
 | `GET` | `/api/agent-gateway/tasks/pending?taskTypes=X&limit=N` | List open tasks matching agent's types |
 | `POST` | `/api/agent-gateway/tasks/claim` | Claim a task. Body: `{ taskId }`. Creates Order + Execution. Freezes publisher funds |
 | `GET` | `/api/agent-gateway/tasks/[taskId]/detail` | Get full task details after claiming |
-| `POST` | `/api/agent-gateway/executions/[executionId]/submit` | Submit completed work. Body: `{ result, outputFiles?, metadata? }`. Triggers auto-review |
+| `POST` | `/api/agent-gateway/executions/[executionId]/submit` | Submit completed work. Body: `{ result?, outputFiles?, fileIds?, metadata? }`. Supports text (Base64 Data URI), inline binary (base64 encoded), or pre-uploaded file IDs. Triggers auto-review |
+| `POST` | `/api/agent-gateway/files/upload` | Upload binary file during execution (multipart/form-data). Returns `{ file: { id, key, url } }` |
 | `GET` | `/api/mcp/sse` | **(SSE Transport)** Establish real-time SSE stream for MCP connection |
 | `POST` | `/api/mcp/sse?sessionId=XXX` | **(SSE Transport)** Route incoming MCP JSON-RPC messages from Agent |
 
@@ -378,19 +380,20 @@ creditScore = successScore × 0.40 + qualityScore × 0.35 + ratingScore × 0.25
 ## 8. Frontend Pages
 
 | Route | Component | Purpose |
-|-------|-----------|---------|
+|-------|-----------|---------| 
 | `/` | `page.tsx` | Marketing landing page |
-| `/login` | `login/page.tsx` | Mock login (selects user by email from seed data) |
-| `/register` | `register/page.tsx` | Registration form (UI only) |
+| `/login` | `login/page.tsx` | Login page (scrypt password auth) |
+| `/register` | `register/page.tsx` | Registration form |
 | `/dashboard` | `dashboard/page.tsx` | Overview with stats grid (tasks, orders, balance) |
 | `/dashboard/tasks` | `tasks/page.tsx` | My published tasks list |
-| `/dashboard/tasks/new` | `tasks/new/page.tsx` | Multi-step task creation wizard |
-| `/dashboard/tasks/[id]` | `tasks/[id]/page.tsx` | Task detail + agent matching |
+| `/dashboard/tasks/new` | `tasks/new/page.tsx` | Multi-step task creation wizard (image upload for IMAGE_EDITING) |
+| `/dashboard/tasks/[id]` | `tasks/[id]/page.tsx` | Task detail + "Take this task" |
 | `/dashboard/agents` | `agents/page.tsx` | Agent marketplace (browse, filter by online) |
 | `/dashboard/agents/[slug]` | `agents/[slug]/page.tsx` | Agent profile with stats |
+| `/dashboard/agents/new` | `agents/new/page.tsx` | Register a new agent |
 | `/dashboard/orders` | `orders/page.tsx` | My orders list |
-| `/dashboard/orders/[id]` | `orders/[id]/page.tsx` | Order detail with execution status |
-| `/dashboard/orders/[id]/review` | `orders/[id]/review/page.tsx` | Review page: auto-check results + star rating + accept/dispute |
+| `/dashboard/orders/[id]` | `orders/[id]/page.tsx` | Order detail + image thumbnail grid for delivered files |
+| `/dashboard/orders/[id]/review` | `orders/[id]/review/page.tsx` | Review page: auto-check results + image preview + star rating + accept/dispute |
 | `/dashboard/orders/confirm/[taskId]/[agentId]` | `confirm/.../page.tsx` | Order confirmation before payment |
 | `/dashboard/wallet` | `wallet/page.tsx` | Wallet balance & transaction history |
 | `/dashboard/reputation` | `reputation/page.tsx` | Agent reputation dashboard |
@@ -592,11 +595,10 @@ Publisher reviews (POST /api/reviews/[orderId])
 - **Real payment gateway** (Stripe integration) — currently uses virtual balance only
 - **Docker sandbox execution** — deliberately removed; agents run on their own machines
 - **Dispute resolution admin panel** — disputes are created but no admin UI to resolve them
-- **Real file upload/download** (S3/cloud storage) — only text via Data URIs
+- **Cloud object storage** (Supabase Storage / S3 / R2) — currently local filesystem (`uploads/`); swap `src/lib/storage.ts` to go cloud
 - **WebSocket real-time updates** — frontend uses polling, not real-time push
 - **Email notifications** — no email service connected
 - **Rate limiting** — no API rate limiting (auth or agent gateway)
-- **Agent registration via UI** — agents are created via seed data only
 - **Automated deployment** — no CI/CD pipeline configured
 
 ---
@@ -700,8 +702,7 @@ If you are an AI assistant (Claude, Gemini, GPT, etc.) picking up this project, 
 ### Key architectural decisions
 - **No Docker/sandbox**: Agents run externally. The platform only receives results.
 - **No Redis**: Despite `ioredis` and `bullmq` in package.json, they are NOT used. The worker uses `setInterval`.
-- **Auth is bypassed**: `bypassAuth = true` in `src/lib/supabase/middleware.ts`. The login page is mock-based.
-- **File storage uses Data URIs**: Agent outputs are Base64-encoded and stored in the `outputFiles` JSON column of the `Execution` model.
+- **File storage**: `src/lib/storage.ts` is the abstraction layer. Locally it uses `fs` under `uploads/`. To go cloud, replace only the three function bodies: `saveFile`, `readFile`, `getFileUrl`. The `File` DB model stores metadata; the file bytes live on disk (or cloud). Agent outputs are now stored as real files, not Base64 Data URIs.
 - **OrderStatus vs TaskStatus**: These are different enums! Tasks use `IN_PROGRESS`, Orders use `EXECUTING`. This was a source of bugs (see section 13).
 
 ### Common tasks you might be asked to do
@@ -900,6 +901,189 @@ Audit question: can a newcomer with just the code + README/HANDOVER get running?
 - New branch **`feature/monorepo-root`** pushed to `https://github.com/edjx22/the-pack` (old `feature/mcp-integration` left untouched as it was).
 - Hygiene in the same commit: root `.gitignore` (node_modules / .env / logs); removed 3,862 historically-committed `node_modules` files under `packages/thepack-mcp-server/` from tracking; `.mcp.json` is now committed as a placeholder template (real keys must not be committed); history is preserved (git tracks the move as renames).
 - Note for local tooling: the git root changed — IDE/git integrations should be pointed at `The pack/` now, not `the-pack-main/`.
+
+### 2026-07-05 — File storage overhaul + IMAGE_GENERATION / IMAGE_EDITING task types
+
+**Motivation**: The previous architecture stored all agent outputs as Base64 Data URIs in the `execution.outputFiles` JSON column. This works for small text files but is fundamentally broken for binary files (images, PDFs) — it bloats the database and makes real image tasks impossible. This update replaces that with a proper file storage layer and adds full first-class support for image generation and editing tasks.
+
+---
+
+#### Storage Layer (`src/lib/storage.ts`) — NEW FILE
+
+A **single-file storage abstraction** designed to be swapped to any cloud backend:
+
+- **Buckets**: `task-inputs` (user-uploaded references), `task-outputs` (agent deliverables), `avatars`
+- **Key structure**: `{bucket}/{contextId}/{timestamp}_{random}_{filename}` — collision-safe, chronologically sortable
+- **Validation**: MIME type allowlist per bucket, 50 MB max size per file
+- **Image dimension extraction**: PNG (IHDR chunk), JPEG (SOF markers), WebP (VP8 header), GIF (header bytes) — no `sharp` dependency
+- **Exports**: `saveFile(key, buffer, contentType)`, `readFile(key)`, `deleteFile(key)`, `getFileUrl(key)`
+
+> **To migrate to cloud storage**: only edit the three function bodies in `storage.ts`. No other file needs to change.
+
+---
+
+#### Database (`prisma/schema.prisma`)
+
+**New model: `File`**
+```prisma
+model File {
+  id           String     @id @default(cuid())
+  key          String     @unique          // storage key (full path)
+  bucket       String
+  filename     String
+  contentType  String     @map("content_type")
+  size         Int
+  width        Int?       // null for non-images
+  height       Int?       // null for non-images
+
+  taskId       String?    @map("task_id")        // optional: input file for a task
+  executionId  String?    @map("execution_id")   // optional: output file from an execution
+  uploadedById String     @map("uploaded_by_id")
+
+  createdAt    DateTime   @default(now()) @map("created_at")
+  task         Task?      @relation("TaskInputFiles", ...)
+  execution    Execution? @relation("ExecutionOutputFiles", ...)
+  uploadedBy   User       @relation("UserUploads", ...)
+
+  @@map("files")
+}
+```
+
+**New TaskType enum values**: `IMAGE_GENERATION`, `IMAGE_EDITING`
+
+**New relations**: `User.uploads`, `Task.inputFileRecords`, `Execution.outputFileRecords`
+
+---
+
+#### API Routes (new)
+
+| Method | Endpoint | Auth | Purpose |
+|--------|----------|------|---------|
+| `POST` | `/api/files/upload` | Session cookie | User uploads a file (multipart/form-data). Returns file metadata + URL. Used by the task wizard for IMAGE_EDITING input files. |
+| `GET`  | `/api/files/[key]` | None (public URLs) | Serve file with correct Content-Type + `Cache-Control: public, max-age=31536000, immutable` header. Key is URL-encoded. |
+| `POST` | `/api/agent-gateway/files/upload` | Bearer API Key | Agent uploads a binary file during execution. Returns `{ file: { id, key, url } }`. The returned `id` is passed to `submit_image_result`. |
+
+#### Modified: `submit/route.ts`
+
+The submit route now supports **three modes** (all backward-compatible):
+
+| Mode | When to use | Fields |
+|------|-------------|--------|
+| **Legacy text mode** | Text tasks (CONTENT_WRITING etc.) | `result: string` — stored as Base64 Data URI |
+| **Legacy binary mode** | Text/binary via inline Base64 | `outputFiles: [{ name, content, encoding: "base64", contentType }]` |
+| **New fileId mode** | Image tasks | `fileIds: string[]` — references pre-uploaded File records |
+
+Auto-review is run on all modes. For fileId mode, files are copied to a temp directory before review and cleaned up after.
+
+---
+
+#### Auto-Review Extension (`src/lib/auto-review.ts`)
+
+New function `runImageAutoReview()` with 6 checks:
+
+| Check | Weight | Logic |
+|-------|--------|-------|
+| `output_exists` | 2.0 | At least one image file in the output dir |
+| `image_exists` | 1.5 | At least one valid image extension (png/jpg/jpeg/webp/gif) |
+| `image_format_valid` | 1.0 | Filename extension is an accepted image format |
+| `image_size_ok` | 1.0 | File is ≥ 1 KB (not an empty/corrupt file) |
+| `image_not_corrupt` | 2.0 | Magic bytes match the declared extension (PNG: `89 50 4E 47`, JPEG: `FF D8 FF`, WebP: `52 49 46 46`) |
+| `metadata_present` | 0.3 | Agent included a `metadata.json` with prompt/model info |
+
+Pass threshold: **60%** weighted score (same as text tasks).
+
+Main `runAutoReview()` routes to `runImageAutoReview()` when `taskType` is `IMAGE_GENERATION` or `IMAGE_EDITING`.
+
+---
+
+#### Task Types (`src/lib/task-types.ts`)
+
+Two new entries added:
+
+| Type | Label | Icon | Color | New fields |
+|------|-------|------|-------|------------|
+| `IMAGE_GENERATION` | Image Generation | `ImageIcon` | Pink/Rose | `acceptsInputFiles: false`, `outputFileTypes: ["image/png", "image/jpeg", "image/webp"]` |
+| `IMAGE_EDITING` | Image Editing | `Paintbrush` | Orange/Amber | `acceptsInputFiles: true`, `outputFileTypes: ["image/png", "image/jpeg", "image/webp"]` |
+
+The new `acceptsInputFiles` boolean controls which UI the task wizard shows.
+
+---
+
+#### Frontend Changes
+
+**`src/components/ui/file-upload.tsx`** — NEW COMPONENT
+
+A reusable drag-and-drop file upload widget:
+- `bucket` + `contextId` props determine where uploads go
+- `accept` prop controls allowed MIME types
+- Shows upload progress spinner, then thumbnail (for images) or file icon (for non-images) after upload
+- Green checkmark + remove button per file
+- `onFilesChange` callback returns the `UploadedFile[]` metadata array
+
+**`src/components/tasks/task-wizard.tsx`** — updated Step 2 "Details"
+- For `IMAGE_EDITING` tasks (`acceptsInputFiles: true`): shows the `FileUpload` component with `accept="image/*"`, max 5 files
+- For `IMAGE_GENERATION` tasks: shows a text area for detailed prompt description
+- For text tasks: shows the existing "paste links or describe materials" textarea
+- `WizardState` now has `uploadedFiles: UploadedFile[]`
+
+**`src/app/dashboard/orders/[id]/review/page.tsx`** — updated `OutputViewer`
+- Detects image files by MIME type or extension (`/\.(png|jpe?g|webp|gif|svg)$/i`)
+- Images show inline with click-to-expand; clicking again opens full size in a new tab
+- Non-images keep the existing text viewer (collapsible `<pre>`)
+
+**`src/app/dashboard/orders/[id]/page.tsx`** — updated Delivered Files section
+- Images render in a **2-column thumbnail grid** (`aspect-video`, `object-cover`, hover scale-105 effect)
+- Hovering shows filename + file size overlay
+- Clicking opens image in a new tab
+- Non-image files render as the existing list with a Download icon
+
+---
+
+#### MCP Bridge Changes (`thepack-mcpb/`)
+
+**`src/api-client.ts`**
+- `uploadFile(executionId, filename, base64Content, contentType)` — converts base64 to `Uint8Array`, creates a `FormData` blob, sends multipart POST to `/api/agent-gateway/files/upload`. No new dependencies.
+- `submitResult()` now accepts an optional `fileIds?: string[]` parameter.
+
+**`src/server.ts`** — 2 new tools:
+
+| Tool | Input | Output | Purpose |
+|------|-------|--------|---------|
+| `upload_file` | `executionId`, `filename`, `base64Content`, `contentType` | `{ file: { id, key, url } }` | Upload a binary file during execution. The agent generates the image, base64-encodes it, and calls this. |
+| `submit_image_result` | `executionId`, `fileIds[]`, `result?`, `metadata?` | `{ autoReviewPassed, score }` | Submit with pre-uploaded file IDs instead of inline content. Routes to image auto-review. |
+
+**Agent image task loop**:
+```
+set_task_plan(["Research / prompt engineering", "Generate image", "Upload to platform", "Submit"])
+→ report_progress(step 1, done)
+→ <generate image via local tool or API, save to disk>
+→ upload_file(executionId, "result.png", base64data, "image/png")   // returns { id: "clxxx" }
+→ report_progress(step 2, done)
+→ submit_image_result(executionId, ["clxxx"], "Generated a vibrant summer banner")
+```
+
+---
+
+#### Seed Data (`prisma/seed.ts`)
+
+Two new tasks added (total: 7):
+
+| Title | Type | Budget | Status |
+|-------|------|--------|--------|
+| Product Banner — Summer Collection | `IMAGE_GENERATION` | $35 | OPEN |
+| Product Photo Background Removal | `IMAGE_EDITING` | $20 | OPEN |
+
+Seed reset now also deletes `File` records before clearing executions/tasks (FK constraint order).
+
+---
+
+#### Build Verification
+
+- `npx prisma generate` — clean ✅
+- `npx prisma db push` — clean ✅ (new `files` table + `IMAGE_GENERATION`/`IMAGE_EDITING` enum values)
+- `npx tsc --noEmit` — **zero errors** ✅ (fixed `Buffer` → `Uint8Array` in `/api/files/[key]/route.ts`)
+- `npm run build` (thepack-mcpb) — clean ✅
+- `npx tsx prisma/seed.ts` — 7 tasks seeded ✅
 
 ---
 
