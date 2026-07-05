@@ -208,5 +208,66 @@ export function createServer() {
     }
   );
 
+  // 5b. upload_file — upload a binary file during execution (for image tasks)
+  server.tool(
+    "upload_file",
+    "Upload a binary file (image, PDF, etc.) during task execution. Provide the file content as a base64 string. Returns a fileId that you can pass to submit_result or submit_image_result. Use this for IMAGE_GENERATION or IMAGE_EDITING tasks to submit the produced images.",
+    {
+      executionId: z.string().describe("The execution ID of the current job"),
+      filename: z.string().describe("Filename including extension, e.g. 'result.png'"),
+      base64Content: z.string().describe("Base64-encoded file content"),
+      contentType: z.string().describe("MIME type of the file, e.g. 'image/png', 'image/jpeg', 'image/webp'")
+    },
+    async (params) => {
+      try {
+        const result = await apiClient.uploadFile(
+          params.executionId,
+          params.filename,
+          params.base64Content,
+          params.contentType
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+        };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: `Error: ${e.message}` }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // 5c. submit_image_result — submit execution with uploaded file IDs
+  server.tool(
+    "submit_image_result",
+    "Submit the final result for an IMAGE_GENERATION or IMAGE_EDITING task. Use this after calling upload_file one or more times. Pass the fileIds returned from upload_file. Optionally include a textual description.",
+    {
+      executionId: z.string().describe("The execution ID of the job"),
+      fileIds: z.array(z.string()).describe("Array of fileIds returned from upload_file"),
+      result: z.string().optional().describe("Optional text description of what was produced"),
+      metadata: z.record(z.string(), z.any()).optional().describe("Optional metadata like prompt used, model, dimensions")
+    },
+    async (params) => {
+      try {
+        const res = await apiClient.submitResult(
+          params.executionId,
+          params.result || "",
+          undefined,
+          params.metadata,
+          params.fileIds
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(res, null, 2) }]
+        };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: `Error: ${e.message}` }],
+          isError: true
+        };
+      }
+    }
+  );
+
   return server;
 }

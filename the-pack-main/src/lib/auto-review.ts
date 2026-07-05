@@ -24,6 +24,13 @@ export interface AutoReviewResult {
 
 const PASS_THRESHOLD = 0.60;
 
+/** Task types that produce image output instead of text */
+const IMAGE_TASK_TYPES = new Set(["IMAGE_GENERATION", "IMAGE_EDITING"]);
+
+function isImageTask(taskType: string): boolean {
+  return IMAGE_TASK_TYPES.has(taskType);
+}
+
 /**
  * Run auto-review on execution output files for a given task type.
  */
@@ -35,6 +42,11 @@ export async function runAutoReview(params: {
   outputDir: string;
 }): Promise<AutoReviewResult> {
   const { executionId, taskType, outputFormat, outputDir } = params;
+
+  // Route to image-specific review for image task types
+  if (isImageTask(taskType)) {
+    return runImageAutoReview(params);
+  }
 
   const checks: AutoCheck[] = [];
 
@@ -190,4 +202,144 @@ function getMinWordCount(taskType: string): number {
     FORMATTING: 100,
   };
   return minimums[taskType] ?? 150;
+}
+
+/**
+ * Run auto-review for image output tasks.
+ * Checks for image existence, format, size, and file integrity.
+ */
+async function runImageAutoReview(params: {
+  executionId: string;
+  taskType: string;
+  taskTitle: string;
+  outputFormat: string | null;
+  outputDir: string;
+}): Promise<AutoReviewResult> {
+  const { outputDir } = params;
+  const checks: AutoCheck[] = [];
+
+  // ── 1. Output directory exists and has files ─────────────────────────────────
+  let files: string[] = [];
+  try {
+    const entries = fs.readdirSync(outputDir);
+    files = entries.filter((f: string) => !f.startsWith("."));
+  } catch {
+    // directory doesn't exist
+  }
+
+  const outputExists = files.length > 0;
+  checks.push({
+    check: "output_exists",
+    passed: outputExists,
+    details: outputExists
+      ? `Output directory contains ${files.length} file(s)`
+      : "No output files found",
+    weight: 2.0,
+  });
+
+  if (!outputExists) {
+    return buildResult(checks, "No output produced by agent execution");
+  }
+
+  // ── 2. At least one image file present ────────────────────────────────────────
+  const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]);
+  const imageFiles = files.filter((f: string) => {
+    const ext = path.extname(f).toLowerCase();
+    return imageExtensions.has(ext);
+  });
+  const hasImage = imageFiles.length > 0;
+  checks.push({
+    check: "image_exists",
+    passed: hasImage,
+    details: hasImage
+      ? `Found ${imageFiles.length} image file(s): ${imageFiles.join(", ")}`
+      : "No image files found in output",
+    weight: 2.0,
+  });
+
+  if (!hasImage) {
+    return buildResult(checks, "No image files in output");
+  }
+
+  // ── 3. Image format validation ────────────────────────────────────────────────
+  const acceptedFormats = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+  const validFormats = imageFiles.filter((f: string) => acceptedFormats.has(path.extname(f).toLowerCase()));
+  const formatOk = validFormats.length > 0;
+  checks.push({
+    check: "image_format",
+    passed: formatOk,
+    details: formatOk
+      ? `Accepted format(s): ${validFormats.map((f: string) => path.extname(f)).join(", ")}`
+      : "No images in accepted format (PNG, JPEG, WebP)",
+    weight: 1.0,
+  });
+
+  // ── 4. Image file size validation ─────────────────────────────────────────────
+  const MIN_IMAGE_SIZE = 10 * 1024;        // 10 KB
+  const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
+  let sizeOk = true;
+  let sizeDetails = "Image file size(s) within acceptable range";
+  for (const img of imageFiles) {
+    try {
+      const stat = fs.statSync(path.join(outputDir, img));
+      if (stat.size < MIN_IMAGE_SIZE) {
+        sizeOk = false;
+        sizeDetails = `${img} is too small (${(stat.size / 1024).toFixed(1)} KB, min 10 KB)`;
+        break;
+      }
+      if (stat.size > MAX_IMAGE_SIZE) {
+        sizeOk = false;
+        sizeDetails = `${img} is too large (${(stat.size / 1024 / 1024).toFixed(1)} MB, max 20 MB)`;
+        break;
+      }
+    } catch {
+      sizeOk = false;
+      sizeDetails = `Failed to read file stats for ${img}`;
+      break;
+    }
+  }
+  checks.push({
+    check: "image_size",
+    passed: sizeOk,
+    details: sizeDetails,
+    weight: 1.0,
+  });
+
+  // ── 5. Image integrity check (magic bytes validation) ─────────────────────────
+  let integrityOk = true;
+  let integrityDetails = "Image file(s) pass integrity check";
+  for (const img of validFormats.slice(0, 3)) {
+    try {
+      const data = fs.readFileSync(path.join(outputDir, img));
+      const isPng = data[0] === 0x89 && data[1] === 0x50;
+      const isJpeg = data[0] === 0xFF && data[1] === 0xD8;
+      const isWebp = data.length > 12 && data.slice(8, 12).toString() === "WEBP";
+      if (!isPng && !isJpeg && !isWebp) {
+        integrityOk = false;
+        integrityDetails = `${img}: file header does not match expected image format`;
+        break;
+      }
+    } catch {
+      integrityOk = false;
+      integrityDetails = `Failed to read ${img} for integrity check`;
+      break;
+    }
+  }
+  checks.push({
+    check: "image_not_corrupt",
+    passed: integrityOk,
+    details: integrityDetails,
+    weight: 2.0,
+  });
+
+  // ── 6. Metadata file present ──────────────────────────────────────────────────
+  const hasMetadata = fs.existsSync(path.join(outputDir, "metadata.json"));
+  checks.push({
+    check: "metadata_present",
+    passed: hasMetadata,
+    details: hasMetadata ? "Metadata file generated" : "No metadata file",
+    weight: 0.3,
+  });
+
+  return buildResult(checks, `Image auto-review completed for ${params.taskType} task`);
 }

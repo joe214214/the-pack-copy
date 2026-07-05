@@ -9,6 +9,8 @@ import {
   Languages,
   BarChart3,
   FileStack,
+  ImageIcon,
+  Paintbrush,
   type LucideIcon,
 } from "lucide-react";
 
@@ -20,7 +22,9 @@ export type TaskTypeId =
   | "REPORT_GENERATION"
   | "DATA_EXTRACTION"
   | "TEMPLATE_FILLING"
-  | "FORMATTING";
+  | "FORMATTING"
+  | "IMAGE_GENERATION"
+  | "IMAGE_EDITING";
 
 export interface TaskTypeMeta {
   id: TaskTypeId;
@@ -31,6 +35,8 @@ export interface TaskTypeMeta {
   bgColor: string;
   borderColor: string;
   examples: string[];
+  acceptsInputFiles?: boolean;
+  outputFileTypes?: string[];
 }
 
 export const TASK_TYPES: TaskTypeMeta[] = [
@@ -93,6 +99,30 @@ export const TASK_TYPES: TaskTypeMeta[] = [
     bgColor: "bg-cyan-500/10",
     borderColor: "border-cyan-500/30",
     examples: ["Invoice generation", "Contract fill-in", "Proposal creation"],
+  },
+  {
+    id: "IMAGE_GENERATION",
+    label: "Image Generation",
+    description: "Generate images from text prompts: illustrations, concept art, product shots.",
+    icon: ImageIcon,
+    color: "text-pink-400",
+    bgColor: "bg-pink-500/10",
+    borderColor: "border-pink-500/30",
+    examples: ["Product mockup", "Social media banner", "Blog illustration"],
+    acceptsInputFiles: false,
+    outputFileTypes: ["image/png", "image/jpeg", "image/webp"],
+  },
+  {
+    id: "IMAGE_EDITING",
+    label: "Image Editing",
+    description: "Edit, retouch, enhance, or transform existing images.",
+    icon: Paintbrush,
+    color: "text-orange-400",
+    bgColor: "bg-orange-500/10",
+    borderColor: "border-orange-500/30",
+    examples: ["Background removal", "Color correction", "Style transfer"],
+    acceptsInputFiles: true,
+    outputFileTypes: ["image/png", "image/jpeg", "image/webp"],
   },
 ];
 

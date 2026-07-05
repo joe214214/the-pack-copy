@@ -35,6 +35,8 @@ enum TaskType {
   SUMMARIZATION
   FORMATTING
   TEMPLATE_FILLING
+  IMAGE_GENERATION
+  IMAGE_EDITING
 }
 
 enum TaskStatus {
@@ -111,6 +113,7 @@ model User {
   reviews        Review[]         @relation("ReviewAuthor")
   raisedDisputes Dispute[]        @relation("DisputeRaiser")
   auditLogs      AuditLog[]       @relation("AuditLogActor")
+  uploadedFiles  File[]           @relation("UserUploads")
 
   @@map("users")
 }
@@ -205,6 +208,7 @@ model Task {
   // Relations
   publisher      User       @relation("TaskPublisher", fields: [publisherId], references: [id])
   order          Order?     @relation("TaskOrder")
+  files          File[]     @relation("TaskInputFiles")
 
   @@index([publisherId])
   @@index([status])
@@ -287,6 +291,7 @@ model Execution {
 
   // Relations
   order          Order           @relation("OrderExecution", fields: [orderId], references: [id])
+  files          File[]          @relation("ExecutionOutputFiles")
 
   @@index([status])
   @@map("executions")
@@ -399,8 +404,39 @@ model Dispute {
 }
 
 // ============================================================================
+// FILE — Stored file metadata (inputs and outputs)
+// ============================================================================
+
+model File {
+  id           String         @id @default(cuid())
+  key          String         @unique
+  bucket       String
+  filename     String
+  contentType  String         @map("content_type")
+  size         Int
+  width        Int?
+  height       Int?
+
+  taskId       String?        @map("task_id")
+  executionId  String?        @map("execution_id")
+  uploadedById String         @map("uploaded_by_id")
+
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  task         Task?          @relation("TaskInputFiles", fields: [taskId], references: [id], onDelete: Cascade)
+  execution    Execution?     @relation("ExecutionOutputFiles", fields: [executionId], references: [id], onDelete: Cascade)
+  uploadedBy   User           @relation("UserUploads", fields: [uploadedById], references: [id])
+
+  @@index([taskId])
+  @@index([executionId])
+  @@index([uploadedById])
+  @@map("files")
+}
+
+// ============================================================================
 // AUDIT LOG — Platform governance
 // ============================================================================
+
 
 model AuditLog {
   id             String   @id @default(cuid())

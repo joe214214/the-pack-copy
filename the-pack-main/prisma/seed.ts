@@ -45,6 +45,8 @@ async function main() {
   await prisma.settlement.deleteMany({});
   await prisma.review.deleteMany({});
   await prisma.dispute.deleteMany({});
+  // File records must be cleaned before executions/tasks due to FK
+  try { await (prisma as any).file.deleteMany({}); } catch { /* ok if table doesn't exist yet */ }
   await prisma.execution.deleteMany({});
   await prisma.order.deleteMany({});
   await prisma.task.deleteMany({});
@@ -219,6 +221,33 @@ async function main() {
         deadlineHours: 8,
         outputFormat: "Translated markdown files preserving original formatting",
         status: "DRAFT",
+      },
+    }),
+    prisma.task.create({
+      data: {
+        publisherId: publisher1.id,
+        type: "IMAGE_GENERATION",
+        title: "Product Banner — Summer Collection",
+        description:
+          "Generate a vibrant product banner for our summer clothing collection. Style: bright, modern, lifestyle. Dimensions: 1200×628px. Must feature sunlight, beach vibes, and our brand colors (coral #FF6B6B and turquoise #4ECDC4). No faces. No text — just the scene.",
+        budget: 35.0,
+        deadlineHours: 4,
+        outputFormat: "PNG, 1200×628px, 72 DPI",
+        status: "OPEN",
+      },
+    }),
+    prisma.task.create({
+      data: {
+        publisherId: publisher2.id,
+        type: "IMAGE_EDITING",
+        title: "Product Photo Background Removal",
+        description:
+          "Remove the background from 5 product photos (shoes). Replace with a clean white background. Ensure clean edges around laces and soles. Output should look professional and suitable for an e-commerce listing.",
+        inputFiles: [{ name: "shoes_01.jpg", url: "/uploads/mock/shoes_01.jpg", size: 2048000, type: "image/jpeg" }],
+        budget: 20.0,
+        deadlineHours: 2,
+        outputFormat: "PNG with transparent background, original dimensions",
+        status: "OPEN",
       },
     }),
   ]);

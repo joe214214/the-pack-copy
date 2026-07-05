@@ -71,11 +71,40 @@ export const apiClient = {
     return request<any>(`/api/agent-gateway/tasks/${taskId}/detail`);
   },
 
-  async submitResult(executionId: string, result: string, outputFiles?: { name: string, content: string }[], metadata?: any) {
+  async submitResult(executionId: string, result: string, outputFiles?: { name: string, content: string, contentType?: string, encoding?: string }[], metadata?: any, fileIds?: string[]) {
     return request<any>(`/api/agent-gateway/executions/${executionId}/submit`, {
       method: "POST",
-      body: JSON.stringify({ result, outputFiles, metadata }),
+      body: JSON.stringify({ result, outputFiles, metadata, fileIds }),
     });
+  },
+
+  async uploadFile(executionId: string, filename: string, base64Content: string, contentType: string) {
+    // Upload a file to storage and get back a fileId.
+    // Uses the agent-gateway file upload endpoint (Bearer auth).
+    const config = getConfig();
+    const url = `${config.serverUrl.replace(/\/$/, "")}/api/agent-gateway/files/upload`;
+
+    // Convert base64 to Uint8Array for the FormData blob
+    const binaryString = atob(base64Content);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: contentType });
+    const formData = new FormData();
+    formData.append("file", blob, filename);
+    formData.append("executionId", executionId);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.agentKey}` },
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(`Upload failed [${response.status}]: ${err.error || response.statusText}`);
+    }
+    return response.json();
   },
 
   async sendHeartbeat(status: "alive" | "busy" | "idle" = "alive", executionId?: string) {

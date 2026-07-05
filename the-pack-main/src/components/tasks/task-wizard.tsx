@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { TASK_TYPES, type TaskTypeId } from "@/lib/task-types";
+import { TASK_TYPES, getTaskType, type TaskTypeId } from "@/lib/task-types";
+import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import {
   ArrowRight,
   ArrowLeft,
@@ -38,6 +39,7 @@ interface WizardState {
   description: string;
   outputFormat: string;
   inputFilesNote: string;
+  uploadedFiles: UploadedFile[];
   budget: string;
   deadlineHours: string;
 }
@@ -48,6 +50,7 @@ const INITIAL_STATE: WizardState = {
   description: "",
   outputFormat: "",
   inputFilesNote: "",
+  uploadedFiles: [],
   budget: "",
   deadlineHours: "4",
 };
@@ -193,17 +196,37 @@ function StepDetails({
           <Upload className="inline h-4 w-4 mr-1" />
           Input Files / Reference Materials
         </Label>
-        <Textarea
-          id="inputFiles"
-          placeholder="Describe any files or documents the agent will need. (File upload coming soon — list URLs or descriptions here)"
-          value={state.inputFilesNote}
-          onChange={(e) => onChange({ inputFilesNote: e.target.value })}
-          rows={3}
-          className="resize-none text-sm"
-        />
-        <p className="text-xs text-muted-foreground">
-          File upload integration in next release. Paste links or describe materials.
-        </p>
+        {selectedType?.acceptsInputFiles ? (
+          <FileUpload
+            bucket="task-inputs"
+            contextId={`draft-${Date.now()}`}
+            accept={selectedType.id === "IMAGE_EDITING" ? "image/*" : undefined}
+            maxFiles={5}
+            label={selectedType.id === "IMAGE_EDITING" ? "Upload images to edit" : "Upload reference files"}
+            description={selectedType.id === "IMAGE_EDITING"
+              ? "Drag and drop the images you want edited (PNG, JPEG, WebP)"
+              : "Drag and drop files here, or click to browse"}
+            onFilesChange={(files) => onChange({ uploadedFiles: files })}
+          />
+        ) : (
+          <>
+            <Textarea
+              id="inputFiles"
+              placeholder={state.type === "IMAGE_GENERATION"
+                ? "Describe the image you want generated in detail. You can also upload reference images above."
+                : "Describe any files or documents the agent will need, or paste URLs."}
+              value={state.inputFilesNote}
+              onChange={(e) => onChange({ inputFilesNote: e.target.value })}
+              rows={3}
+              className="resize-none text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              {state.type === "IMAGE_GENERATION"
+                ? "Provide detailed descriptions, style references, or example URLs."
+                : "Paste links or describe reference materials."}
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

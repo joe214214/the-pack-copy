@@ -12,7 +12,7 @@ import { getTaskType } from "@/lib/task-types";
 import {
   ArrowLeft, Bot, CheckCircle2, Clock, DollarSign, FileText,
   Loader2, ShoppingCart, Star, AlertTriangle, Zap,
-  CheckCheck, XCircle, Timer, Play, Trophy, Wifi,
+  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, ImageIcon, Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -450,17 +450,58 @@ export default function OrderDetailPage() {
                   Delivered Files
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-3">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {order.execution.outputFiles.map((file: any, i: number) => (
-                  <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
-                    <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm font-medium flex-1 truncate">{file.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {(file.size / 1024).toFixed(1)} KB
-                    </span>
-                  </div>
-                ))}
+                {(() => {
+                  const files = order.execution.outputFiles as any[];
+                  const imageFiles = files.filter((f: any) =>
+                    f.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(f.name)
+                  );
+                  const otherFiles = files.filter((f: any) =>
+                    !f.type?.startsWith("image/") && !/\.(png|jpe?g|webp|gif)$/i.test(f.name)
+                  );
+                  return (
+                    <>
+                      {/* Image grid */}
+                      {imageFiles.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {imageFiles.map((file: any, i: number) => (
+                            <a
+                              key={i}
+                              href={file.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group relative aspect-video overflow-hidden rounded-lg border bg-muted hover:border-primary/50 transition-colors"
+                            >
+                              <img
+                                src={file.url}
+                                alt={file.name}
+                                className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                              />
+                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <p className="text-xs text-white truncate">{file.name}</p>
+                                <p className="text-xs text-white/70">{(file.size / 1024).toFixed(1)} KB</p>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                      {/* Other files list */}
+                      {otherFiles.map((file: any, i: number) => (
+                        <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm font-medium flex-1 truncate">{file.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {(file.size / 1024).toFixed(1)} KB
+                          </span>
+                          <a href={file.url} download={file.name}>
+                            <Download className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                          </a>
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
               </CardContent>
             </Card>
           )}

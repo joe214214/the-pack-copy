@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft, CheckCheck, XCircle, Star, FileText, Bot,
   Loader2, ShieldCheck, AlertTriangle, CheckCircle2, Clock,
-  Download, Eye, Zap,
+  Download, Eye, Zap, ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -83,7 +83,11 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
+  const isImage = file.type?.startsWith("image/") ||
+    /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name);
+
   const loadContent = async () => {
+    if (isImage) { setExpanded(!expanded); return; }
     if (content !== null) { setExpanded(!expanded); return; }
     setLoading(true);
     try {
@@ -97,7 +101,11 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
   return (
     <div className="rounded-lg border">
       <div className="flex items-center gap-3 p-3">
-        <FileText className="h-4 w-4 text-blue-400 shrink-0" />
+        {isImage ? (
+          <ImageIcon className="h-4 w-4 text-pink-400 shrink-0" />
+        ) : (
+          <FileText className="h-4 w-4 text-blue-400 shrink-0" />
+        )}
         <span className="text-sm font-medium flex-1">{file.name}</span>
         <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
         <div className="flex gap-2">
@@ -109,7 +117,17 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
           </Button>
         </div>
       </div>
-      {expanded && content !== null && (
+      {expanded && isImage && (
+        <div className="border-t border-border/50 p-4 bg-muted/20 flex justify-center">
+          <img
+            src={file.url}
+            alt={file.name}
+            className="max-h-[600px] max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
+            onClick={() => window.open(file.url, "_blank")}
+          />
+        </div>
+      )}
+      {expanded && !isImage && content !== null && (
         <div className="border-t border-border/50 p-4 bg-muted/20">
           <pre className="text-xs text-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
             {content}
