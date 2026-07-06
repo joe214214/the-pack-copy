@@ -122,9 +122,11 @@ function StepType({
 function StepDetails({
   state,
   onChange,
+  draftId,
 }: {
   state: WizardState;
   onChange: (updates: Partial<WizardState>) => void;
+  draftId: string;
 }) {
   const selectedType = TASK_TYPES.find((t) => t.id === state.type);
 
@@ -196,25 +198,27 @@ function StepDetails({
           <Upload className="inline h-4 w-4 mr-1" />
           Input Files / Reference Materials
         </Label>
-        {selectedType?.acceptsInputFiles ? (
+        {/* Every task type accepts attachments except pure-prompt image generation */}
+        {selectedType && selectedType.acceptsInputFiles !== false && (
           <FileUpload
             bucket="task-inputs"
-            contextId={`draft-${Date.now()}`}
-            accept={selectedType.id === "IMAGE_EDITING" ? "image/*" : undefined}
+            contextId={draftId}
+            accept={selectedType.id === "IMAGE_EDITING" ? "image/*" : ".pdf,.txt,.md,.csv,.json,image/*"}
             maxFiles={5}
-            label={selectedType.id === "IMAGE_EDITING" ? "Upload images to edit" : "Upload reference files"}
+            label={selectedType.id === "IMAGE_EDITING" ? "Upload images to edit" : "Upload attachments (optional)"}
             description={selectedType.id === "IMAGE_EDITING"
               ? "Drag and drop the images you want edited (PNG, JPEG, WebP)"
-              : "Drag and drop files here, or click to browse"}
+              : "PDF, TXT, MD, CSV, JSON or images — the agent receives these with the task"}
             onFilesChange={(files) => onChange({ uploadedFiles: files })}
           />
-        ) : (
+        )}
+        {state.type !== "IMAGE_EDITING" && (
           <>
             <Textarea
               id="inputFiles"
               placeholder={state.type === "IMAGE_GENERATION"
-                ? "Describe the image you want generated in detail. You can also upload reference images above."
-                : "Describe any files or documents the agent will need, or paste URLs."}
+                ? "Describe the image you want generated in detail."
+                : "Optional: paste reference links or notes for the agent."}
               value={state.inputFilesNote}
               onChange={(e) => onChange({ inputFilesNote: e.target.value })}
               rows={3}
@@ -223,7 +227,7 @@ function StepDetails({
             <p className="text-xs text-muted-foreground">
               {state.type === "IMAGE_GENERATION"
                 ? "Provide detailed descriptions, style references, or example URLs."
-                : "Paste links or describe reference materials."}
+                : "Links/notes are appended to the task description the agent sees."}
             </p>
           </>
         )}
@@ -385,6 +389,8 @@ function StepBudget({
 export function TaskWizard() {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  // Stable namespace for pre-task uploads (storage path only, not a real task id)
+  const [draftId] = useState(() => `draft-${Date.now()}`);
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [submitting, setSubmitting] = useState(false);
 
@@ -406,16 +412,23 @@ export function TaskWizard() {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      // Reference links/notes ride along inside the description the agent sees
+      const note = state.inputFilesNote.trim();
+      const description =
+        state.description.trim() +
+        (note ? `\n\n---\nReference materials / links from the publisher:\n${note}` : "");
+
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: state.type,
           title: state.title.trim(),
-          description: state.description.trim(),
+          description: description.slice(0, 5000),
           outputFormat: state.outputFormat.trim() || undefined,
           budget: parseFloat(state.budget),
           deadlineHours: parseInt(state.deadlineHours),
+          fileIds: state.uploadedFiles.map((f) => f.id),
         }),
       });
 
@@ -492,7 +505,7 @@ export function TaskWizard() {
         {step === 1 && (
           <StepType value={state.type} onChange={(v) => update({ type: v })} />
         )}
-        {step === 2 && <StepDetails state={state} onChange={update} />}
+        {step === 2 && <StepDetails state={state} onChange={update} draftId={draftId} />}
         {step === 3 && <StepBudget state={state} onChange={update} />}
       </div>
 

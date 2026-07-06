@@ -124,7 +124,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create File record in database
+    // Create File record in database.
+    // task-inputs are uploaded from the wizard BEFORE the task exists, so we
+    // can't set taskId here (it would violate the FK) — POST /api/tasks links
+    // the records via `fileIds` after the task is created. contextId is only
+    // used to namespace the storage key.
+    let executionId: string | null = null;
+    if (bucket === "task-outputs") {
+      const execution = await prisma.execution.findUnique({ where: { id: contextId } });
+      if (!execution) {
+        return NextResponse.json({ error: "Execution not found for contextId" }, { status: 404 });
+      }
+      executionId = execution.id;
+    }
+
     const fileRecord = await prisma.file.create({
       data: {
         key: result.key,
@@ -134,8 +147,8 @@ export async function POST(request: NextRequest) {
         size: result.size,
         width,
         height,
-        taskId: bucket === "task-inputs" ? contextId : null,
-        executionId: bucket === "task-outputs" ? contextId : null,
+        taskId: null,
+        executionId,
         uploadedById: user.id,
       },
     });

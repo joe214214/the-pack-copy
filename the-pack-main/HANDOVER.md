@@ -1100,4 +1100,21 @@ Also: colleague's `db push` applied only to their own DB; this machine's DB was 
 
 ---
 
+### 2026-07-06 (later) — Task attachments for ALL task types (and fixed the broken upload chain)
+
+Goal: publishers can attach files to any task, and the agent can actually read them. While wiring this, found the 07-05 upload chain was broken end-to-end in three places (compile-verified only, never run):
+1. **FK violation on upload** — the wizard uploads before the task exists, but `/api/files/upload` wrote `File.taskId = "draft-..."` (nonexistent task → insert rejected). Now: `task-inputs` uploads are created with `taskId: null` (contextId only namespaces the storage key); `task-outputs` uploads validate the execution exists.
+2. **Files never reached the task** — the wizard never sent the uploaded files to `POST /api/tasks`. Now: wizard sends `fileIds[]`; the route links File records post-create (ownership + unattached checks) and mirrors `[{ id, name, url, size, type }]` into the legacy `inputFiles` JSON (so task pages + gateway work unchanged).
+3. **Image types rejected at creation** — `createTaskSchema`'s enum lacked `IMAGE_GENERATION`/`IMAGE_EDITING`, so the wizard's image tasks got 422. Added.
+
+**New capability**
+- Wizard: attachment upload (PDF/TXT/MD/CSV/JSON/images, max 5) now shows for **every** task type except IMAGE_GENERATION (`acceptsInputFiles !== false` logic); text tasks keep the links/notes textarea, whose content is now appended into the description (previously silently discarded). Stable per-session `draftId` for upload namespacing.
+- **Agent can read attachments**: new gateway route `GET /api/agent-gateway/files/[fileId]` (agent-key auth; the file must belong to a task whose order is assigned to the calling agent — verified 403 otherwise). Text returns utf8, binary returns base64.
+- **New MCP tool `get_input_file(fileId)`** in `thepack-mcpb` (+ runner allowlist + runner/manifest prompts tell the agent to fetch inputFiles before working). Manifest **v1.0.3**, `.mcpb` rebuilt & repacked — Desktop users reinstall.
+- Task detail page: input files are now clickable download links.
+
+**Verified end-to-end (runtime)**: upload spec.txt → create task with fileIds → inputFiles JSON carries id+url → assign to agent → gateway jobs shows the attachment → `GET /api/agent-gateway/files/[id]` returns utf8 content → other agent gets 403 → public URL 200. Both builds clean. Smoke-test task deleted (escrow refunded).
+
+---
+
 *End of handover document. Good luck to whoever picks this up! 🐺*

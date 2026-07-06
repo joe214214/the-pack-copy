@@ -38,6 +38,23 @@ export function createServer() {
     }
   );
 
+  // 0b2. get_input_file — read a task attachment's content
+  server.tool(
+    "get_input_file",
+    "Fetch the content of a task attachment (input file). Use the file `id` from the job's inputFiles list. Text files return utf8 content; binary files return base64.",
+    {
+      fileId: z.string().describe("The id of the input file (from inputFiles in get_assigned_jobs / get_task_detail)")
+    },
+    async (params) => {
+      try {
+        const result = await apiClient.getInputFile(params.fileId);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+      }
+    }
+  );
+
   // 0c. set_task_plan — break the task into a checklist the publisher can watch
   server.tool(
     "set_task_plan",

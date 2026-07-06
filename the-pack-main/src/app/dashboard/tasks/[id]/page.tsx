@@ -259,16 +259,19 @@ export default function TaskDetailPage() {
               <CardContent>
                 <div className="space-y-2">
                   {task.inputFiles.map((file, i) => (
-                    <div
+                    <a
                       key={i}
-                      className="flex items-center gap-2 text-sm rounded-lg border p-2"
+                      href={file.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm rounded-lg border p-2 transition-colors hover:bg-muted/50 hover:border-primary/30"
                     >
                       <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="truncate">{file.name}</span>
+                      <span className="truncate flex-1">{file.name}</span>
                       <span className="text-xs text-muted-foreground shrink-0">
                         {file.type}
                       </span>
-                    </div>
+                    </a>
                   ))}
                 </div>
               </CardContent>

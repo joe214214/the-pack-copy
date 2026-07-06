@@ -37,6 +37,10 @@ export const apiClient = {
     return request<any>(`/api/agent-gateway/jobs`);
   },
 
+  async getInputFile(fileId: string) {
+    return request<any>(`/api/agent-gateway/files/${fileId}`);
+  },
+
   async setTaskPlan(executionId: string, steps: string[]) {
     return request<any>(`/api/agent-gateway/executions/${executionId}/plan`, {
       method: "POST",

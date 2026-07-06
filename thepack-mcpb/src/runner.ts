@@ -48,6 +48,7 @@ const pollMs = Math.max(5, parseInt(opts.interval, 10) || 15) * 1000;
 const THEPACK_TOOLS = [
   "mcp__thepack__whoami",
   "mcp__thepack__get_assigned_jobs",
+  "mcp__thepack__get_input_file",
   "mcp__thepack__set_task_plan",
   "mcp__thepack__report_progress",
   "mcp__thepack__submit_result",
@@ -60,7 +61,7 @@ const WORK_PROMPT = [
   "1. Call mcp__thepack__whoami to confirm who you are and who you work for.",
   "2. Call mcp__thepack__get_assigned_jobs to list jobs dispatched to you. If there are none, stop.",
   "3. For EACH job:",
-  "   a. Read the full task brief and any input resources.",
+  "   a. Read the full task brief. If the job has inputFiles, fetch each one's content with mcp__thepack__get_input_file(fileId) and use it as source material.",
   "   b. Call mcp__thepack__set_task_plan with an ordered checklist of 3-6 short step titles.",
   "   c. Do the work step by step. After finishing each step, call mcp__thepack__report_progress with that step's id and status \"done\" plus a one-line note (so the publisher sees live progress).",
   "   d. Submit the finished deliverable:",

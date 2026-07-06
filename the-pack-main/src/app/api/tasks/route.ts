@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { getFileUrl } from "@/lib/storage";
 import { z } from "zod";
 
 // ============================================================================
@@ -68,6 +69,8 @@ const createTaskSchema = z.object({
     "DATA_EXTRACTION",
     "TEMPLATE_FILLING",
     "FORMATTING",
+    "IMAGE_GENERATION",
+    "IMAGE_EDITING",
   ]),
   title: z.string().min(5).max(200),
   description: z.string().min(20).max(5000),
@@ -75,12 +78,8 @@ const createTaskSchema = z.object({
   deadlineHours: z.number().int().positive(),
   outputFormat: z.string().optional(),
   qualityCriteria: z.record(z.string(), z.unknown()).optional(),
-  inputFiles: z.array(z.object({
-    name: z.string(),
-    url: z.string(),
-    size: z.number(),
-    type: z.string(),
-  })).optional(),
+  // IDs of File records the wizard pre-uploaded (attachments)
+  fileIds: z.array(z.string()).max(10).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -104,10 +103,37 @@ export async function POST(request: NextRequest) {
         deadlineHours: data.deadlineHours,
         outputFormat: data.outputFormat,
         qualityCriteria: (data.qualityCriteria ?? {}) as object,
-        inputFiles: (data.inputFiles ?? []) as object[],
+        inputFiles: [],
         status: "OPEN",
       },
     });
+
+    // Link pre-uploaded attachments to the task. Only files the caller uploaded
+    // themselves and that aren't already attached elsewhere can be linked.
+    if (data.fileIds && data.fileIds.length > 0) {
+      await prisma.file.updateMany({
+        where: {
+          id: { in: data.fileIds },
+          uploadedById: user.id,
+          taskId: null,
+          executionId: null,
+          bucket: "task-inputs",
+        },
+        data: { taskId: task.id },
+      });
+
+      // Mirror into the legacy inputFiles JSON (what the task pages and the
+      // agent gateway read): [{ id, name, url, size, type }]
+      const linked = await prisma.file.findMany({ where: { taskId: task.id } });
+      const inputFiles = linked.map((f) => ({
+        id: f.id,
+        name: f.filename,
+        url: getFileUrl(f.key),
+        size: f.size,
+        type: f.contentType,
+      }));
+      await prisma.task.update({ where: { id: task.id }, data: { inputFiles } });
+    }
 
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
