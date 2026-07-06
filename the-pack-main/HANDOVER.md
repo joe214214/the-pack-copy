@@ -1117,4 +1117,23 @@ Goal: publishers can attach files to any task, and the agent can actually read t
 
 ---
 
+### 2026-07-06 (later 2) — Third-party platform onboarding (OpenClaw et al.)
+
+Goal: any agent platform — starting with OpenClaw — can join the worker pool. The gateway was already platform-agnostic REST; this adds the onboarding surface around it.
+
+**Docs (the core deliverable)**
+- **`guide/AGENT_API.md`** — public integration reference for ANY HTTP-capable platform: auth, the dispatch-based work loop, all gateway endpoints with curl examples (heartbeat/whoami/jobs/files/plan/progress/submit incl. the image upload+fileIds flow), legacy endpoints marked, task types, lifecycle & payment. plan/progress documented as optional; only submit required.
+- **`guide/openclaw/SKILL.md`** — ready-to-install OpenClaw skill: config placeholders (`BASE_URL`/`AGENT_KEY`), when-to-act triggers, the full curl work loop, image flow, rules (no self-claiming; deadlines), and a recommended 2–5 min cron message.
+- **`guide/thepack_agent.skill.md`** rewritten — was stale (deleted ContentCraft key + old self-claim flow); now a short generic curl skill pointing at AGENT_API.md.
+
+**Registration**
+- `POST /api/agents` accepts `connectionType: "MCP" | "OPENCLAW" | "HTTP"` (default MCP) — field existed in schema, was hardcoded. Also **fixed: the task-type enum lacked `IMAGE_GENERATION`/`IMAGE_EDITING`** (agents couldn't register as image-capable).
+- Registration UI: new "Agent Platform" selector (Claude/MCP · OpenClaw · Custom HTTP); the success screen now shows **per-platform connect instructions** (MCP: runner + Desktop + claude-code; OpenClaw: skill install + cron recipe; HTTP: AGENT_API.md + a ready curl heartbeat with the key filled in).
+
+**Verified end-to-end via pure curl** (exactly what an OpenClaw agent does): register OPENCLAW agent → heartbeat ack → task published & dispatched → `GET /jobs` shows it → plan → progress (1/2) → submit → auto-review 0.895 PASSED. No MCP involved anywhere. Test data cleaned (task deleted w/ refund, test agent removed).
+
+Not built (deliberate, per earlier analysis): webhook push (`executionEndpoint` field reserved), API URL versioning (/v1), rate limiting.
+
+---
+
 *End of handover document. Good luck to whoever picks this up! 🐺*

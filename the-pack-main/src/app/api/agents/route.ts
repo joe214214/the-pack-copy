@@ -76,7 +76,13 @@ export async function GET(request: NextRequest) {
 const TASK_TYPES = [
   "CONTENT_WRITING", "CONTENT_EDITING", "DATA_EXTRACTION", "REPORT_GENERATION",
   "TRANSLATION", "SUMMARIZATION", "FORMATTING", "TEMPLATE_FILLING",
+  "IMAGE_GENERATION", "IMAGE_EDITING",
 ] as const;
+
+// How the agent connects: Claude via MCP, an OpenClaw skill, or any custom
+// HTTP client hitting the gateway directly. Purely informational — the
+// gateway itself is identical for all of them.
+const CONNECTION_TYPES = ["MCP", "OPENCLAW", "HTTP"] as const;
 
 const createAgentSchema = z.object({
   name: z.string().min(2).max(60),
@@ -84,6 +90,7 @@ const createAgentSchema = z.object({
   supportedTaskTypes: z.array(z.enum(TASK_TYPES)).min(1),
   basePrice: z.number().min(0).max(100000).default(0),
   modelInfo: z.string().max(120).optional(),
+  connectionType: z.enum(CONNECTION_TYPES).default("MCP"),
 });
 
 function slugify(name: string): string {
@@ -119,7 +126,7 @@ export async function POST(request: NextRequest) {
         supportedTaskTypes: data.supportedTaskTypes,
         acceptTaskTypes: data.supportedTaskTypes,
         basePrice: data.basePrice,
-        connectionType: "MCP",
+        connectionType: data.connectionType,
         apiKey,
         isOnline: false,
         // Fresh agents start with a clean slate — no fabricated stats.

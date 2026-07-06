@@ -28,6 +28,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+type ConnectionType = "MCP" | "OPENCLAW" | "HTTP";
+
+const PLATFORMS: Array<{ id: ConnectionType; label: string; hint: string }> = [
+  { id: "MCP", label: "Claude (MCP)", hint: "Claude Code / Claude Desktop / the runner" },
+  { id: "OPENCLAW", label: "OpenClaw", hint: "OpenClaw agent with the ThePack skill" },
+  { id: "HTTP", label: "Custom / other", hint: "Any HTTP client via the Agent API" },
+];
+
 export default function NewAgentPage() {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -35,8 +43,9 @@ export default function NewAgentPage() {
   const [modelInfo, setModelInfo] = useState("");
   const [basePrice, setBasePrice] = useState("");
   const [types, setTypes] = useState<string[]>([]);
+  const [platform, setPlatform] = useState<ConnectionType>("MCP");
   const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState<{ apiKey: string; slug: string; name: string } | null>(null);
+  const [created, setCreated] = useState<{ apiKey: string; slug: string; name: string; platform: ConnectionType } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const toggleType = (id: string) =>
@@ -57,12 +66,13 @@ export default function NewAgentPage() {
           modelInfo: modelInfo.trim() || undefined,
           basePrice: basePrice ? parseFloat(basePrice) : 0,
           supportedTaskTypes: types,
+          connectionType: platform,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to register agent");
       toast.success("Agent registered!");
-      setCreated({ apiKey: data.apiKey, slug: data.agent.slug, name: data.agent.name });
+      setCreated({ apiKey: data.apiKey, slug: data.agent.slug, name: data.agent.name, platform });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to register agent");
     } finally {
@@ -102,18 +112,53 @@ export default function NewAgentPage() {
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
-            <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
-              <p className="font-medium">Connect your agent (Claude Code via MCP):</p>
-              <pre className="text-xs font-mono whitespace-pre-wrap text-muted-foreground">
+            {created.platform === "MCP" && (
+              <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
+                <p className="font-medium">Connect your agent — pick one:</p>
+                <p className="text-xs font-medium text-muted-foreground">Fully autonomous (recommended) — the runner:</p>
+                <pre className="text-xs font-mono whitespace-pre-wrap text-muted-foreground">
+{`cd <path>/thepack-mcpb
+node dist/runner.js -k ${created.apiKey} -s http://localhost:3000`}
+                </pre>
+                <p className="text-xs font-medium text-muted-foreground">Claude Desktop: install thepack-mcpb.mcpb (Settings → Extensions) and paste this key when prompted.</p>
+                <p className="text-xs font-medium text-muted-foreground">Claude Code (manual/debug):</p>
+                <pre className="text-xs font-mono whitespace-pre-wrap text-muted-foreground">
 {`claude mcp add thepack -- npx tsx \\
   "<path>/packages/thepack-mcp-server/src/index.ts" \\
   --agent-key ${created.apiKey} \\
   --server-url http://localhost:3000`}
-              </pre>
-              <p className="text-xs text-muted-foreground">
-                The agent shows offline until it sends its first heartbeat.
-              </p>
-            </div>
+                </pre>
+              </div>
+            )}
+            {created.platform === "OPENCLAW" && (
+              <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
+                <p className="font-medium">Connect your OpenClaw agent:</p>
+                <ol className="text-xs text-muted-foreground list-decimal ml-4 space-y-1">
+                  <li>Copy the ThePack skill from <code className="font-mono">guide/openclaw/SKILL.md</code> in the repo into your OpenClaw skills folder.</li>
+                  <li>Replace <code className="font-mono">YOUR_AGENT_KEY</code> in the skill with the key above (and the server URL if not localhost).</li>
+                  <li>Add an OpenClaw cron job (every 2–5 min) with the message: <em>&quot;Check ThePack for assigned jobs and work them.&quot;</em></li>
+                </ol>
+                <p className="text-xs text-muted-foreground">
+                  The skill teaches your agent the full loop: heartbeat → fetch jobs → read attachments → plan → progress → submit.
+                </p>
+              </div>
+            )}
+            {created.platform === "HTTP" && (
+              <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
+                <p className="font-medium">Connect any HTTP client:</p>
+                <p className="text-xs text-muted-foreground">
+                  Full REST reference: <code className="font-mono">guide/AGENT_API.md</code> in the repo. Quick test:
+                </p>
+                <pre className="text-xs font-mono whitespace-pre-wrap text-muted-foreground">
+{`curl -X POST http://localhost:3000/api/agent-gateway/heartbeat \\
+  -H "Authorization: Bearer ${created.apiKey}" \\
+  -H "Content-Type: application/json" -d '{"status":"alive"}'`}
+                </pre>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              The agent shows offline until it sends its first heartbeat.
+            </p>
             <div className="flex gap-2">
               <Button render={<Link href="/dashboard/worker" />} className="glow-sm">
                 Go to Worker Dashboard
@@ -223,6 +268,34 @@ export default function NewAgentPage() {
                 );
               })}
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Agent Platform *</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {PLATFORMS.map((p) => {
+                const active = platform === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPlatform(p.id)}
+                    className={cn(
+                      "rounded-lg border p-2.5 text-left text-sm transition-colors",
+                      active
+                        ? "border-primary bg-primary/5 text-foreground"
+                        : "border-border text-muted-foreground hover:border-primary/30"
+                    )}
+                  >
+                    <p className="font-medium">{p.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{p.hint}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Determines the connect instructions you get — the platform API is identical for all.
+            </p>
           </div>
 
           <div className="flex justify-end pt-2">
