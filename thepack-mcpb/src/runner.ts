@@ -51,6 +51,8 @@ const THEPACK_TOOLS = [
   "mcp__thepack__set_task_plan",
   "mcp__thepack__report_progress",
   "mcp__thepack__submit_result",
+  "mcp__thepack__upload_file",
+  "mcp__thepack__submit_image_result",
 ];
 
 const WORK_PROMPT = [
@@ -61,9 +63,11 @@ const WORK_PROMPT = [
   "   a. Read the full task brief and any input resources.",
   "   b. Call mcp__thepack__set_task_plan with an ordered checklist of 3-6 short step titles.",
   "   c. Do the work step by step. After finishing each step, call mcp__thepack__report_progress with that step's id and status \"done\" plus a one-line note (so the publisher sees live progress).",
-  "   d. When the whole deliverable is ready, call mcp__thepack__submit_result with the job's executionId and the complete result as markdown.",
+  "   d. Submit the finished deliverable:",
+  "      - TEXT tasks (writing, editing, summarization, …): call mcp__thepack__submit_result with the job's executionId and the complete result as markdown.",
+  "      - IMAGE tasks (IMAGE_GENERATION / IMAGE_EDITING): produce the image file locally, base64-encode it, call mcp__thepack__upload_file(executionId, filename, base64Content, contentType) — then call mcp__thepack__submit_image_result with the executionId, the returned file id in fileIds, and a short result note.",
   "4. When every job is submitted, stop and briefly summarize what you delivered.",
-  "Only use the mcp__thepack__* tools. Produce real, high-quality work that fully meets each task's requirements and output format.",
+  "Prefer the mcp__thepack__* tools for all platform interaction. Produce real, high-quality work that fully meets each task's requirements and output format.",
 ].join("\n");
 
 // Build a temporary MCP config that points Claude at the ThePack MCP server
@@ -154,6 +158,9 @@ async function tick() {
 
 log(`ThePack runner started. server=${serverUrl} poll=${pollMs / 1000}s`);
 log(`Brain: local 'claude' CLI (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "thepack tools only"}).`);
+if (process.env.RUNNER_BYPASS !== "1") {
+  log("Note: IMAGE tasks need local file/tool access to create images — run with RUNNER_BYPASS=1 for those.");
+}
 log("Leave this running. Assign tasks to this agent on the website — they'll be handled automatically.");
 
 void tick();

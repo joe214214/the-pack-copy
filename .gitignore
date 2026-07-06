@@ -9,6 +9,9 @@ node_modules/
 .next/
 *.tsbuildinfo
 
+# local file storage (src/lib/storage.ts) — user/agent uploaded files live here
+uploads/
+
 # logs & OS junk
 *.log
 .DS_Store

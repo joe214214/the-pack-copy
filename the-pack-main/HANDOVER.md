@@ -1087,4 +1087,17 @@ Seed reset now also deletes `File` records before clearing executions/tasks (FK 
 
 ---
 
+### 2026-07-06 — Post-review fixes for the file-storage/image update
+
+Review of the 2026-07-05 image-task work found three integration gaps; all fixed:
+1. **Runner blocked image tasks** — `thepack-mcpb/src/runner.ts` allowlist only permitted the original 5 tools, so headless claude couldn't call `upload_file`/`submit_image_result`. Added both to `THEPACK_TOOLS`, added an image-task branch to the runner's work prompt, and a startup hint that image tasks need `RUNNER_BYPASS=1` (creating image files requires local tool access beyond the allowlist). README Mode A documents the same.
+2. **Stale `.mcpb` package** — the 07-05 commit updated `src/` + `dist/` but never repacked the extension, so Desktop installs lacked the new tools. Manifest `start_working` prompt now includes the image submission flow; version bumped to **1.0.2**; rebuilt (`tsc` clean) and repacked (3.0 MB). Desktop users must reinstall.
+3. **`uploads/` not gitignored** — local storage dir would show up as untracked files; added to root `.gitignore`.
+
+Open design question (deliberately NOT changed): `GET /api/files/[key]` is public-by-key — anyone with a file URL can download a deliverable before the publisher pays. Needs a product decision (session/role check vs. capability URLs).
+
+Also: colleague's `db push` applied only to their own DB; this machine's DB was synced (`prisma db push` — `files` table + image enums verified present).
+
+---
+
 *End of handover document. Good luck to whoever picks this up! 🐺*
