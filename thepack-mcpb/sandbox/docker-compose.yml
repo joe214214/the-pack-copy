@@ -1,0 +1,40 @@
+# ThePack Sandbox Runner — one-command sealed worker.
+#
+#   cp .env.example .env   (fill in your keys)
+#   docker compose up -d   (start, runs in background)
+#   docker compose logs -f (watch it work)
+#   docker compose down    (stop)
+#
+# Isolation comes from what this file does NOT do: there are no `volumes:`
+# mapping host folders in, and `env_file` passes ONLY the four declared vars —
+# the container never inherits your shell's environment or sees your disk.
+
+services:
+  runner:
+    build:
+      context: ..                 # the thepack-mcpb/ folder
+      dockerfile: sandbox/Dockerfile
+    image: thepack/sandbox-runner
+    container_name: thepack-sandbox
+    restart: unless-stopped
+
+    # Only these variables cross into the box. Nothing else from the host.
+    environment:
+      THEPACK_AGENT_KEY: ${THEPACK_AGENT_KEY}
+      THEPACK_SERVER_URL: ${THEPACK_SERVER_URL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      POLL_INTERVAL: ${POLL_INTERVAL:-15}
+
+    # Defense-in-depth: the agent can't gain new privileges, and its scratch
+    # filesystem is capped so a runaway job can't fill the host disk.
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /home/worker/jobs:size=512m
+      - /tmp:size=256m
+
+    # NOTE on network egress:
+    # By default a job cannot reach your host files or memory, but it CAN reach
+    # the internet. To harden further (recommended for production) put this
+    # container behind an egress-allowlist proxy that only permits your ThePack
+    # domain + api.anthropic.com + any image-API you use. See README "Hardening".

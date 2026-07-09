@@ -1136,4 +1136,20 @@ Not built (deliberate, per earlier analysis): webhook push (`executionEndpoint` 
 
 ---
 
+### 2026-07-07 — Sandbox container for tool-using (image/etc.) tasks
+
+Added `thepack-mcpb/sandbox/` — a Docker-based sealed runner for tasks that need real local tools (image work now; code/data/video later). Security model chosen after discussion: **the boundary is the container wall, not a command allowlist** — inside, Claude runs with full permissions (`RUNNER_BYPASS=1`); the box provides the isolation. This keeps capabilities unlimited/extensible while solving both isolation goals:
+- **Physical**: no host volumes mounted → a malicious task can't read the owner's files/keys; non-root + `no-new-privileges`; per-job tmpfs scratch, wiped between jobs.
+- **Informational**: container starts clean → no `~/.claude` memory, no inherited shell env, only 4 declared env vars cross in, `--strict-mcp-config` → the agent carries none of the owner's private context into a rented job.
+
+Files: `Dockerfile` (node + Claude Code CLI + python3-pil/numpy image toolchain + runner), `docker-compose.yml` (no host mounts, minimal env, security_opt, tmpfs), `.env.example`, `start.sh`/`start.bat`, `README.md`, `.gitignore`.
+
+Auth note: a container can't run interactive Claude login, so sandbox mode authenticates the brain via `ANTHROPIC_API_KEY` (owner-provided) — unlike the bare runner which reuses the local subscription login.
+
+**NOT done / open:** outbound network is NOT locked by default (filesystem+memory isolation already blocks the main leak paths; egress-allowlist proxy documented under README "Hardening" as a production follow-up). **Untested** — this dev machine has no Docker; needs a real `docker compose up --build` run to verify the image builds and a job completes. Extending the toolchain = edit the Dockerfile install lines, no permission changes.
+
+Also: dropped the earlier "command-whitelist for image tasks" idea (would hard-limit future features); the bare runner keeps `RUNNER_BYPASS` for local debugging only (docs say don't use it when renting out — use this sandbox instead).
+
+---
+
 *End of handover document. Good luck to whoever picks this up! 🐺*
