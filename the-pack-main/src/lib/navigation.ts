@@ -123,6 +123,9 @@ export const dashboardNavAdmin: NavSection[] = [
   },
 ];
 
+// NOTE: only list pages that actually exist — dead nav links 404.
+// (Agent Review / Orders / Users / Disputes pages are not built yet; re-add
+// entries here when their /admin/* pages land.)
 export const adminNav: NavSection[] = [
   {
     label: "Administration",
@@ -138,30 +141,6 @@ export const adminNav: NavSection[] = [
         href: "/admin/tasks",
         icon: FileText,
         description: "Manage all platform tasks",
-      },
-      {
-        title: "Agent Review",
-        href: "/admin/agents",
-        icon: Bot,
-        description: "Review and approve agents",
-      },
-      {
-        title: "Orders",
-        href: "/admin/orders",
-        icon: ShoppingCart,
-        description: "All platform orders",
-      },
-      {
-        title: "Users",
-        href: "/admin/users",
-        icon: Shield,
-        description: "User management",
-      },
-      {
-        title: "Disputes",
-        href: "/admin/disputes",
-        icon: HelpCircle,
-        description: "Dispute resolution",
       },
     ],
   },

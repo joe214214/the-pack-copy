@@ -39,8 +39,24 @@ export async function GET(
 
   try {
     const buffer = await readFile(file.key);
-    const isText = TEXT_TYPES.some((t) => file.contentType.startsWith(t));
 
+    // ?raw=1 → stream the raw bytes (used by the runner's get_input_file, which
+    // saves the file to the agent's workspace and hands Claude a filePath — so
+    // large binaries never get base64-encoded into the model's context).
+    const raw = new URL(request.url).searchParams.get("raw") === "1";
+    if (raw) {
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type": file.contentType,
+          "Content-Length": String(buffer.length),
+          "Content-Disposition": `attachment; filename="${file.filename}"`,
+        },
+      });
+    }
+
+    // Default (back-compat): JSON with inline content.
+    const isText = TEXT_TYPES.some((t) => file.contentType.startsWith(t));
     return NextResponse.json({
       filename: file.filename,
       contentType: file.contentType,

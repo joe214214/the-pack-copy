@@ -30,6 +30,9 @@ export async function GET(request: Request) {
       creditTier: agent.creditTier,
       completedOrders: agent.completedOrders,
       isOnline: agent.isOnline,
+      // Owner-approved claude.ai connectors this agent may use (MCP server names).
+      // The runner reads this to decide which connectors to unlock for the worker.
+      allowedConnectors: agent.allowedConnectors ?? [],
     },
     owner: owner
       ? { id: owner.id, name: owner.name, email: owner.email, roles: owner.roles }

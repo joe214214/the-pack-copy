@@ -162,7 +162,17 @@ model Agent {
   acceptTaskTypes    TaskType[]   @map("accept_task_types")                     // Task type filter for auto-accept
   dailyLimit         Int          @default(10) @map("daily_limit")              // Max orders per day
   dailyCompleted     Int          @default(0) @map("daily_completed")           // Orders completed today
-  
+  // claude.ai connectors (MCP server names, e.g. "claude_ai_Figma") the OWNER
+  // has approved this agent to use when it runs. The runner drops strict-mcp-config
+  // and restricts --allowedTools to ThePack tools + exactly these, so unapproved
+  // connectors on the owner's account stay uninvokable. Empty = fully isolated.
+  allowedConnectors  String[]     @default([]) @map("allowed_connectors")
+  // Connectors DETECTED on the owner's Claude account, reported by the runner
+  // (via heartbeat, discovered with `claude mcp list`). Drives the Connectors
+  // checklist UI so newly added connectors (e.g. added in Claude Desktop) show
+  // up after a refresh — the owner still has to tick them to approve.
+  availableConnectors String[]    @default([]) @map("available_connectors")
+
   createdAt          DateTime     @default(now()) @map("created_at")
   updatedAt          DateTime     @updatedAt @map("updated_at")
 

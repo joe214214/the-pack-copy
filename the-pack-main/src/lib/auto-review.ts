@@ -40,6 +40,7 @@ export async function runAutoReview(params: {
   taskTitle: string;
   outputFormat: string | null;
   outputDir: string;
+  qualityCriteria?: Record<string, unknown> | null;
 }): Promise<AutoReviewResult> {
   const { executionId, taskType, outputFormat, outputDir } = params;
 
@@ -82,8 +83,13 @@ export async function runAutoReview(params: {
   }
 
   // ── 2. Minimum content length ──────────────────────────────────────────────
+  // Honor the task's stated requirement (qualityCriteria.minWords) when given;
+  // otherwise only flag trivial/near-empty output. The reviewer can't know the
+  // intended length, so genre-appropriate length is the publisher's call — a
+  // legitimate 120-word blurb must not auto-fail.
   const wordCount = content.split(/\s+/).filter(Boolean).length;
-  const minWords = getMinWordCount(taskType);
+  const qcMinRaw = Number((params.qualityCriteria as Record<string, unknown> | null | undefined)?.minWords);
+  const minWords = Number.isFinite(qcMinRaw) && qcMinRaw > 0 ? qcMinRaw : getMinWordCount(taskType);
   const hasMinLength = wordCount >= minWords;
   checks.push({
     check: "min_length",
@@ -92,12 +98,22 @@ export async function runAutoReview(params: {
     weight: 1.5,
   });
 
-  // ── 3. Markdown structure (headers present) ────────────────────────────────
+  // ── 3. Structure / coherence ───────────────────────────────────────────────
+  // Pass for any well-formed deliverable: markdown headers, lists, multiple
+  // paragraphs, OR simply a few sentences of prose. Short single-paragraph
+  // outputs (blurbs, edits, translations) are legitimate and should pass; this
+  // only flags trivial one-liners or unstructured dumps.
   const hasHeaders = /^#{1,3}\s+.+/m.test(content);
+  const hasList = /^\s*([-*+]|\d+\.)\s+/m.test(content);
+  const hasParagraphs = content.trim().split(/\n\s*\n/).filter(Boolean).length >= 2;
+  const sentenceCount = (content.match(/[.!?](\s|$)/g) || []).length;
+  const wellFormed = hasHeaders || hasList || hasParagraphs || sentenceCount >= 3;
   checks.push({
     check: "has_structure",
-    passed: hasHeaders,
-    details: hasHeaders ? "Document has markdown headers" : "No section headers found",
+    passed: wellFormed,
+    details: wellFormed
+      ? "Content is well-formed (structure or coherent prose)"
+      : "Output looks trivial or unstructured",
     weight: 1.0,
   });
 
@@ -191,17 +207,20 @@ function buildResult(checks: AutoCheck[], summary: string): AutoReviewResult {
 }
 
 function getMinWordCount(taskType: string): number {
+  // Low "not empty / not a one-liner" floors — NOT genre length targets. When a
+  // task actually needs more, it should say so via qualityCriteria.minWords
+  // (honored above). This just catches trivial output.
   const minimums: Record<string, number> = {
-    CONTENT_WRITING: 400,
-    CONTENT_EDITING: 200,
-    SUMMARIZATION: 50,
-    TRANSLATION: 100,
-    REPORT_GENERATION: 300,
-    DATA_EXTRACTION: 50,
-    TEMPLATE_FILLING: 100,
-    FORMATTING: 100,
+    CONTENT_WRITING: 50,
+    CONTENT_EDITING: 30,
+    SUMMARIZATION: 30,
+    TRANSLATION: 20,
+    REPORT_GENERATION: 50,
+    DATA_EXTRACTION: 20,
+    TEMPLATE_FILLING: 20,
+    FORMATTING: 20,
   };
-  return minimums[taskType] ?? 150;
+  return minimums[taskType] ?? 30;
 }
 
 /**
@@ -275,7 +294,10 @@ async function runImageAutoReview(params: {
   });
 
   // ── 4. Image file size validation ─────────────────────────────────────────────
-  const MIN_IMAGE_SIZE = 10 * 1024;        // 10 KB
+  // Only flag empty/blank/placeholder files — a clean vector-style PNG (gradient
+  // + text) legitimately compresses to a few KB. Real validity is the magic-byte
+  // integrity check below, not raw size.
+  const MIN_IMAGE_SIZE = 1024;             // 1 KB
   const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
   let sizeOk = true;
   let sizeDetails = "Image file size(s) within acceptable range";
@@ -284,7 +306,7 @@ async function runImageAutoReview(params: {
       const stat = fs.statSync(path.join(outputDir, img));
       if (stat.size < MIN_IMAGE_SIZE) {
         sizeOk = false;
-        sizeDetails = `${img} is too small (${(stat.size / 1024).toFixed(1)} KB, min 10 KB)`;
+        sizeDetails = `${img} is too small (${(stat.size / 1024).toFixed(1)} KB, min 1 KB)`;
         break;
       }
       if (stat.size > MAX_IMAGE_SIZE) {

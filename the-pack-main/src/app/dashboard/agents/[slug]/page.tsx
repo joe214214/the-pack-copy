@@ -29,10 +29,27 @@ import {
   Trophy,
   Wifi,
   Activity,
+  Plug,
+  ShieldAlert,
+  RefreshCw,
 } from "lucide-react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentDetail = any;
+
+// claude.ai connectors an owner can approve for their agent. `server` is the MCP
+// server name the runner matches against; `sensitive` connectors touch private
+// accounts/data, so we warn before the owner hands them to a rented worker.
+const KNOWN_CONNECTORS: {
+  server: string;
+  label: string;
+  desc: string;
+  sensitive: boolean;
+}[] = [
+  { server: "claude_ai_Figma", label: "Figma", desc: "Create & read designs, diagrams, FigJam boards", sensitive: false },
+  { server: "claude_ai_Google_Drive", label: "Google Drive", desc: "Read/write files in your Drive", sensitive: true },
+  { server: "claude_ai_Interactive_Brokers", label: "Interactive Brokers", desc: "Trading & account access", sensitive: true },
+];
 
 function StarRating({ rating }: { rating: number }) {
   return (
@@ -57,12 +74,20 @@ export default function AgentProfilePage() {
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Current viewer — used to show the owner-only Connectors card.
+  const [me, setMe] = useState<{ id: string; isAdmin?: boolean } | null>(null);
+  const [connSel, setConnSel] = useState<string[]>([]);
+  const [connSaving, setConnSaving] = useState(false);
+  const [connSaved, setConnSaved] = useState(false);
+  const [connRefreshing, setConnRefreshing] = useState(false);
+
   useEffect(() => {
     const fetchAgent = async () => {
       try {
         const res = await fetch(`/api/agents/${slug}`);
         const data = await res.json();
         setAgent(data.agent);
+        setConnSel(Array.isArray(data.agent?.allowedConnectors) ? data.agent.allowedConnectors : []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -71,6 +96,76 @@ export default function AgentProfilePage() {
     };
     if (slug) fetchAgent();
   }, [slug]);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setMe(d?.user ?? null))
+      .catch(() => setMe(null));
+  }, []);
+
+  const isOwner = !!(me && agent && (me.id === agent.owner?.id || me.isAdmin));
+
+  function toggleConnector(server: string) {
+    setConnSel((prev) =>
+      prev.includes(server) ? prev.filter((s) => s !== server) : [...prev, server]
+    );
+    setConnSaved(false);
+  }
+
+  // Re-fetch the agent to pick up connectors newly reported by the runner
+  // (e.g. one just added in Claude Desktop). Resets unsaved ticks to the
+  // saved state — refresh means "show me the current truth".
+  async function refreshConnectors() {
+    setConnRefreshing(true);
+    try {
+      const res = await fetch(`/api/agents/${slug}`);
+      const data = await res.json();
+      if (data.agent) {
+        setAgent(data.agent);
+        setConnSel(Array.isArray(data.agent.allowedConnectors) ? data.agent.allowedConnectors : []);
+        setConnSaved(false);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setConnRefreshing(false);
+    }
+  }
+
+  // The checklist = connectors detected on the owner's Claude account (reported
+  // by the runner via heartbeat), falling back to the curated list before the
+  // first report, plus anything already approved (so it never disappears).
+  const detectedConnectors: string[] = Array.isArray(agent?.availableConnectors)
+    ? agent.availableConnectors
+    : [];
+  const connectorServers: string[] = Array.from(
+    new Set([
+      ...(detectedConnectors.length ? detectedConnectors : KNOWN_CONNECTORS.map((c) => c.server)),
+      ...connSel,
+    ])
+  );
+
+  async function saveConnectors() {
+    setConnSaving(true);
+    setConnSaved(false);
+    try {
+      const res = await fetch(`/api/agents/${slug}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowedConnectors: connSel }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setConnSel(data.agent?.allowedConnectors ?? connSel);
+        setConnSaved(true);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setConnSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -395,6 +490,105 @@ export default function AgentProfilePage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Owner-only: approve which claude.ai connectors this agent may use */}
+          {isOwner && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2">
+                    <Plug className="h-4 w-4 text-primary" />
+                    Connectors
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    onClick={refreshConnectors}
+                    disabled={connRefreshing}
+                  >
+                    <RefreshCw className={cn("h-3 w-3", connRefreshing && "animate-spin")} />
+                    Refresh
+                  </Button>
+                </CardTitle>
+                <CardDescription>
+                  Local tools, skills and plugins are always available to your
+                  agent — no approval needed. Only your Claude account&apos;s
+                  connectors are gated: tick the ones this agent may use.
+                  Refresh picks up connectors newly added to your account
+                  (detected by your runner while it&apos;s online).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {connectorServers.map((server) => {
+                  const known = KNOWN_CONNECTORS.find((c) => c.server === server);
+                  const checked = connSel.includes(server);
+                  const label =
+                    known?.label ??
+                    server.replace(/^claude_ai_/, "").replace(/_/g, " ");
+                  return (
+                    <label
+                      key={server}
+                      className="flex items-start gap-3 rounded-lg border bg-muted/20 p-3 cursor-pointer hover:bg-muted/40 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleConnector(server)}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{label}</span>
+                          {known?.sensitive && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] gap-1 border-amber-500/50 text-amber-500 bg-amber-500/10"
+                            >
+                              <ShieldAlert className="h-3 w-3" />
+                              Sensitive
+                            </Badge>
+                          )}
+                        </div>
+                        {known?.desc && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{known.desc}</p>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+
+                {connSel.some((s) =>
+                  KNOWN_CONNECTORS.some((c) => c.server === s && c.sensitive)
+                ) && (
+                  <p className="flex items-start gap-1.5 text-xs text-amber-500">
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    A sensitive connector is enabled — this agent can act on that
+                    account while doing others&apos; tasks. Only enable what you trust.
+                  </p>
+                )}
+
+                <div className="flex items-center gap-3 pt-1">
+                  <Button size="sm" onClick={saveConnectors} disabled={connSaving}>
+                    {connSaving ? (
+                      <>
+                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                        Saving…
+                      </>
+                    ) : (
+                      "Save connectors"
+                    )}
+                  </Button>
+                  {connSaved && (
+                    <span className="flex items-center gap-1 text-xs text-emerald-500">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Saved
+                    </span>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>

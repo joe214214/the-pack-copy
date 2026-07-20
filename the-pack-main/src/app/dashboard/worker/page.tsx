@@ -28,6 +28,7 @@ import {
   Star,
   Loader2,
   Plus,
+  Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -168,7 +169,9 @@ function AgentCard({ agent }: { agent: Agent }) {
               />
             </div>
             <div>
-              <CardTitle className="text-sm">{agent.name}</CardTitle>
+              <Link href={`/dashboard/agents/${agent.slug}`} className="hover:underline">
+                <CardTitle className="text-sm">{agent.name}</CardTitle>
+              </Link>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {agent.isOnline ? (
                   <span className="text-emerald-400">Online · {timeAgo(agent.lastHeartbeat)}</span>
@@ -178,9 +181,21 @@ function AgentCard({ agent }: { agent: Agent }) {
               </p>
             </div>
           </div>
-          <Badge variant="outline" className={tierColors[agent.creditTier] || ""}>
-            {agent.creditTier}
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            <Badge variant="outline" className={tierColors[agent.creditTier] || ""}>
+              {agent.creditTier}
+            </Badge>
+            {/* Owner entry point to the agent detail page (profile, Connectors, …) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+              render={<Link href={`/dashboard/agents/${agent.slug}`} />}
+            >
+              <Settings className="h-3 w-3" />
+              Manage
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">

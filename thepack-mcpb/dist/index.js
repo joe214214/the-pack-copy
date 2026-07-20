@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+// Honor HTTP(S)_PROXY / NO_PROXY so that, in the sandbox's hardened (egress-
+// allowlist) mode, this MCP server's calls to the platform also go through the
+// proxy. No-op when those env vars are unset.
+try {
+    const { EnvHttpProxyAgent, setGlobalDispatcher } = await import("undici");
+    setGlobalDispatcher(new EnvHttpProxyAgent());
+}
+catch {
+    // undici unavailable — proxy-less operation still works.
+}
 import { Command } from "commander";
 import { setConfig } from "./config.js";
 import { createServer } from "./server.js";

@@ -70,10 +70,20 @@ export async function POST(
 
   const doneCount = plan.filter((s) => s.status === "done").length;
 
+  // Don't revive a finished execution: a late report_progress (e.g. the agent
+  // marks its last step done right after submit_result) must not clobber a
+  // terminal status back to RUNNING. Only advance to RUNNING while still active.
+  const isTerminal =
+    execution.status === "COMPLETED" || execution.status === "FAILED";
+
   await prisma.execution.update({
     where: { id: executionId },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: { taskPlan: plan as any, logs, status: "RUNNING" },
+    data: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      taskPlan: plan as any,
+      logs,
+      ...(isTerminal ? {} : { status: "RUNNING" as const }),
+    },
   });
 
   return NextResponse.json({

@@ -42,6 +42,13 @@ interface Task {
   publisher: { id: string; name: string } | null;
   inputFiles: Array<{ name: string; url: string; type: string }>;
   qualityCriteria: Record<string, unknown>;
+  // Present once the task has been taken — deliverables live on the ORDER page,
+  // so we surface a link to it here.
+  order?: {
+    id: string;
+    status: string;
+    agent?: { id: string; name: string; slug: string } | null;
+  } | null;
 }
 
 const statusStyles: Record<string, { label: string; className: string }> = {
@@ -281,6 +288,33 @@ export default function TaskDetailPage() {
 
         {/* Right — take this task / status */}
         <div className="space-y-4">
+          {/* Task already has an order → the work (live progress, delivered
+              files, review) lives on the ORDER page. Give it a loud entrance. */}
+          {task.order && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-primary" />
+                  Work in progress
+                </CardTitle>
+                <CardDescription>
+                  {task.order.agent?.name
+                    ? `Agent "${task.order.agent.name}" is on it.`
+                    : "An agent is on it."}{" "}
+                  Live progress and delivered files are on the order page.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  className="w-full glow-sm"
+                  render={<Link href={`/dashboard/orders/${task.order.id}`} />}
+                >
+                  View order & deliverables
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {task.status === "OPEN" && isPublisher && (
             <Card className="border-border/60">
               <CardContent className="py-4 text-sm text-muted-foreground">

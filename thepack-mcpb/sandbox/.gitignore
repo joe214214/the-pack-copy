@@ -1,2 +1,5 @@
 # holds your API keys — never commit
 .env
+
+# a COPY of your Claude login token + skills, seeded by start.sh/.bat — never commit
+claude-home/

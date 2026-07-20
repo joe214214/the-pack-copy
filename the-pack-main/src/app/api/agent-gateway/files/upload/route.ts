@@ -5,7 +5,12 @@
  * Used in two-step submission: upload file → submit with fileIds.
  *
  * Auth: Bearer API Key (agent authentication)
- * Body: multipart/form-data with file + executionId
+ * Body, either:
+ *   - multipart/form-data with `file` + `executionId`, OR
+ *   - application/json { executionId, filename, sourceUrl, contentType? } —
+ *     the server fetches sourceUrl itself (host-allowlisted). This lets an agent
+ *     hand off an image it produced via a tool that returns a URL (e.g. a Figma
+ *     screenshot) WITHOUT round-tripping multi-KB base64 through the model.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/agent-auth";
@@ -17,6 +22,20 @@ import {
   detectContentType,
   StorageError,
 } from "@/lib/storage";
+
+// Hosts the server is allowed to fetch a sourceUrl from. Kept tight to avoid
+// SSRF — only asset hosts we expect agents to hand back. Extend via env
+// FILE_FETCH_ALLOW_HOSTS (comma-separated, matched as suffixes).
+const DEFAULT_FETCH_HOSTS = ["figma.com"];
+function isAllowedFetchHost(hostname: string): boolean {
+  const extra = (process.env.FILE_FETCH_ALLOW_HOSTS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const allow = [...DEFAULT_FETCH_HOSTS, ...extra];
+  const h = hostname.toLowerCase();
+  return allow.some((a) => h === a || h.endsWith(`.${a}`));
+}
+
+const MAX_FETCH_BYTES = 25 * 1024 * 1024; // 25 MB ceiling for server-side fetch
 
 // Simple image dimension extraction from headers
 function getImageDimensions(buffer: Buffer, contentType: string): { width: number; height: number } | null {
@@ -51,15 +70,66 @@ export async function POST(request: NextRequest) {
   const { agent } = auth;
 
   try {
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const executionId = formData.get("executionId") as string | null;
+    // Gather (executionId, filename, buffer, contentType) from EITHER a
+    // multipart upload or a JSON sourceUrl the server fetches itself.
+    const reqContentType = request.headers.get("content-type") || "";
+    let executionId: string | null = null;
+    let filename = "";
+    let buffer: Buffer;
+    let contentType = "";
 
-    if (!file) {
-      return NextResponse.json({ error: "Missing 'file' in form data" }, { status: 400 });
-    }
-    if (!executionId) {
-      return NextResponse.json({ error: "Missing 'executionId'" }, { status: 400 });
+    if (reqContentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const file = formData.get("file") as File | null;
+      executionId = formData.get("executionId") as string | null;
+      if (!file) {
+        return NextResponse.json({ error: "Missing 'file' in form data" }, { status: 400 });
+      }
+      if (!executionId) {
+        return NextResponse.json({ error: "Missing 'executionId'" }, { status: 400 });
+      }
+      buffer = Buffer.from(await file.arrayBuffer());
+      filename = file.name;
+      contentType = file.type || detectContentType(file.name);
+    } else {
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== "object") {
+        return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      executionId = body.executionId ?? null;
+      filename = String(body.filename || "");
+      const sourceUrl = String(body.sourceUrl || "");
+      if (!executionId) {
+        return NextResponse.json({ error: "Missing 'executionId'" }, { status: 400 });
+      }
+      if (!filename) {
+        return NextResponse.json({ error: "Missing 'filename'" }, { status: 400 });
+      }
+      if (!sourceUrl) {
+        return NextResponse.json({ error: "Provide 'file' (multipart) or 'sourceUrl' (json)" }, { status: 400 });
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(sourceUrl);
+      } catch {
+        return NextResponse.json({ error: "sourceUrl is not a valid URL" }, { status: 400 });
+      }
+      if (parsed.protocol !== "https:") {
+        return NextResponse.json({ error: "sourceUrl must be https" }, { status: 400 });
+      }
+      if (!isAllowedFetchHost(parsed.hostname)) {
+        return NextResponse.json({ error: `sourceUrl host not allowed: ${parsed.hostname}` }, { status: 400 });
+      }
+      const fetched = await fetch(sourceUrl);
+      if (!fetched.ok) {
+        return NextResponse.json({ error: `Could not fetch sourceUrl [${fetched.status}]` }, { status: 400 });
+      }
+      const ab = await fetched.arrayBuffer();
+      if (ab.byteLength > MAX_FETCH_BYTES) {
+        return NextResponse.json({ error: "Fetched file exceeds size limit" }, { status: 413 });
+      }
+      buffer = Buffer.from(ab);
+      contentType = String(body.contentType || fetched.headers.get("content-type") || detectContentType(filename)).split(";")[0].trim();
     }
 
     // Verify this execution belongs to this agent
@@ -78,12 +148,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Execution already ${execution.status}` }, { status: 400 });
     }
 
-    // Read and upload file
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const contentType = file.type || detectContentType(file.name);
-
-    const result = await uploadFile("task-outputs", executionId, file.name, buffer, contentType);
+    const result = await uploadFile("task-outputs", executionId, filename, buffer, contentType);
 
     // Extract image dimensions
     let width: number | null = null;

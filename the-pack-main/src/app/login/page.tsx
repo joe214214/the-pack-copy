@@ -91,12 +91,14 @@ export default function LoginPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
-                <Link
-                  href="/forgot-password"
-                  className="text-xs text-primary hover:underline"
+                {/* Password-reset flow not built yet — a dead /forgot-password
+                    link would 404, so keep this informational for now. */}
+                <span
+                  className="text-xs text-muted-foreground cursor-help"
+                  title="Password reset isn't available yet — contact the admin to reset your password."
                 >
                   Forgot password?
-                </Link>
+                </span>
               </div>
               <Input
                 id="password"

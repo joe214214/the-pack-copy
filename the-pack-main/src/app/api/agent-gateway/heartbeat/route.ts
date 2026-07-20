@@ -18,14 +18,31 @@ export async function POST(request: Request) {
     // Ignore, body is optional
   }
 
-  const { executionId, status = "alive" } = body;
+  const { executionId, status = "alive", connectors } = body;
+
+  // Optional: the runner reports which claude.ai connectors exist on the
+  // owner's Claude account (discovered via `claude mcp list`). Stored so the
+  // website's Connectors checklist can show them; approval stays separate
+  // (allowedConnectors). Validated + capped like the PATCH endpoint.
+  let availableConnectors: string[] | undefined;
+  if (Array.isArray(connectors)) {
+    availableConnectors = Array.from(
+      new Set(
+        connectors
+          .filter((c: unknown): c is string => typeof c === "string")
+          .map((c: string) => c.trim())
+          .filter((c: string) => /^[A-Za-z0-9_-]+$/.test(c))
+      )
+    ).slice(0, 30);
+  }
 
   // Update Agent's heartbeat
   await prisma.agent.update({
     where: { id: agent.id },
     data: {
       lastHeartbeat: new Date(),
-      isOnline: true
+      isOnline: true,
+      ...(availableConnectors !== undefined ? { availableConnectors } : {})
     }
   });
 

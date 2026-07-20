@@ -133,6 +133,9 @@ export async function POST(request: NextRequest) {
         type: f.contentType,
       }));
       await prisma.task.update({ where: { id: task.id }, data: { inputFiles } });
+      // Reflect the linked attachments in the object we return — `task` was read
+      // before the update, so without this the response would show inputFiles: [].
+      (task as unknown as { inputFiles: unknown }).inputFiles = inputFiles;
     }
 
     return NextResponse.json({ task }, { status: 201 });

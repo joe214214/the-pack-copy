@@ -103,7 +103,8 @@ export async function POST(
     taskType: execution.order.task.type,
     taskTitle: execution.order.task.title,
     outputFormat: execution.order.task.outputFormat,
-    outputDir: tempDir
+    outputDir: tempDir,
+    qualityCriteria: execution.order.task.qualityCriteria as Record<string, unknown> | null,
   });
 
   // 4. Clean up temp dir (best effort)

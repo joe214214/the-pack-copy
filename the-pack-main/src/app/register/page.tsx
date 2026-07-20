@@ -127,14 +127,11 @@ export default function RegisterPage() {
             </Button>
           </form>
           <p className="mt-4 text-center text-xs text-muted-foreground">
+            {/* ToS / Privacy pages don't exist yet — keep as plain text so we
+                don't ship dead links. Turn back into <Link>s when pages land. */}
             By creating an account, you agree to our{" "}
-            <Link href="#" className="text-primary hover:underline">
-              Terms of Service
-            </Link>{" "}
-            and{" "}
-            <Link href="#" className="text-primary hover:underline">
-              Privacy Policy
-            </Link>
+            <span className="text-primary">Terms of Service</span> and{" "}
+            <span className="text-primary">Privacy Policy</span>
             .
           </p>
           <div className="mt-4 text-center text-sm text-muted-foreground">

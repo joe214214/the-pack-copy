@@ -1,0 +1,44 @@
+# ThePack Sandbox — HARDENED egress overlay (network wall).
+# =====================================================================
+# Apply ON TOP of docker-compose.yml to add a real network wall: the runner
+# gets NO direct internet. All its traffic is forced through an allowlist proxy
+# that only permits the ThePack platform, the Anthropic API, and any domains you
+# declare in EGRESS_ALLOW. An injected agent therefore cannot phone home.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d --build
+#
+# ⚠️ EXPERIMENTAL / test before relying on it: this depends on Claude Code and
+# the runner honoring HTTP(S)_PROXY (the runner + MCP server do, via undici;
+# Claude Code supports proxy env vars). If a tool your agent needs can't reach a
+# domain, add it to EGRESS_ALLOW in .env. If something breaks, drop this overlay
+# and run the standard file while you debug.
+
+services:
+  proxy:
+    build:
+      context: ./proxy
+    image: thepack/sandbox-proxy
+    container_name: thepack-sandbox-proxy
+    restart: unless-stopped
+    environment:
+      THEPACK_SERVER_URL: ${THEPACK_SERVER_URL}
+      EGRESS_ALLOW: ${EGRESS_ALLOW:-}
+    networks:
+      - internal   # reachable by the runner
+      - egress     # can reach the internet
+
+  runner:
+    # The runner loses its own internet — it can only talk to the proxy.
+    networks:
+      - internal
+    environment:
+      HTTP_PROXY: http://proxy:8888
+      HTTPS_PROXY: http://proxy:8888
+      NO_PROXY: localhost,127.0.0.1
+    depends_on:
+      - proxy
+
+networks:
+  internal:
+    internal: true   # no route to the internet
+  egress: {}

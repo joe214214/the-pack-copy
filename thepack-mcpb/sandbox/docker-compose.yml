@@ -1,13 +1,17 @@
-# ThePack Sandbox Runner — one-command sealed worker.
+# ThePack Sandbox Runner — one-command sealed worker (STANDARD isolation).
 #
-#   cp .env.example .env   (fill in your keys)
-#   docker compose up -d   (start, runs in background)
-#   docker compose logs -f (watch it work)
-#   docker compose down    (stop)
+#   cp .env.example .env      # fill in your keys
+#   docker compose up -d --build
+#   docker compose logs -f    # watch it work
+#   docker compose down       # stop
 #
-# Isolation comes from what this file does NOT do: there are no `volumes:`
-# mapping host folders in, and `env_file` passes ONLY the four declared vars —
-# the container never inherits your shell's environment or sees your disk.
+# Priorities (in order): (1) NO extra API key — the box reuses your existing
+# Claude login; (2) full functionality — your skills + the container toolchain,
+# Claude at full permissions inside; (3) isolation — no host business files are
+# mounted (can't read/delete your machine), env is not inherited, per-run tmpfs
+# workspace, non-root. Only a COPY of your Claude login+skills enters the box,
+# not your history/memory. Internet is OPEN here (many tools need it); apply
+# docker-compose.hardened.yml for a network wall (see README).
 
 services:
   runner:
@@ -22,19 +26,26 @@ services:
     environment:
       THEPACK_AGENT_KEY: ${THEPACK_AGENT_KEY}
       THEPACK_SERVER_URL: ${THEPACK_SERVER_URL}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # OPTIONAL fallback — leave empty to use your reused Claude login instead.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       POLL_INTERVAL: ${POLL_INTERVAL:-15}
+      # Watchdog: kill a claude run that hasn't exited after this many minutes
+      # (a stalled API stream never errors), release the runner, and retry.
+      CLAUDE_TIMEOUT_MIN: ${CLAUDE_TIMEOUT_MIN:-8}
 
-    # Defense-in-depth: the agent can't gain new privileges, and its scratch
-    # filesystem is capped so a runaway job can't fill the host disk.
+    # NO API KEY NEEDED. `start.sh`/`start.bat` copies your Claude login token
+    # (.credentials.json) and your skills into ./claude-home, which is mounted
+    # here so the boxed Claude runs on YOUR subscription. It's a COPY, so token
+    # refreshes and any writes stay in this folder — your real ~/.claude is not
+    # touched, and your history/memory are never copied in. If ./claude-home is
+    # empty (e.g. `docker compose up` run directly), Claude falls back to
+    # ANTHROPIC_API_KEY if you set one.
+    volumes:
+      - ./claude-home:/home/worker/.claude
+
+    # Defense-in-depth: no privilege escalation. Scratch space (/home/worker/jobs)
+    # is a normal in-image dir owned by the non-root worker; the runner makes a
+    # fresh subdir per job and deletes it after, and the whole container is
+    # disposable, so nothing persists or leaks between runs.
     security_opt:
       - no-new-privileges:true
-    tmpfs:
-      - /home/worker/jobs:size=512m
-      - /tmp:size=256m
-
-    # NOTE on network egress:
-    # By default a job cannot reach your host files or memory, but it CAN reach
-    # the internet. To harden further (recommended for production) put this
-    # container behind an egress-allowlist proxy that only permits your ThePack
-    # domain + api.anthropic.com + any image-API you use. See README "Hardening".

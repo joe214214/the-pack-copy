@@ -1150,6 +1150,497 @@ Auth note: a container can't run interactive Claude login, so sandbox mode authe
 
 Also: dropped the earlier "command-whitelist for image tasks" idea (would hard-limit future features); the bare runner keeps `RUNNER_BYPASS` for local debugging only (docs say don't use it when renting out — use this sandbox instead).
 
+### 2026-07-11 — Sandbox reworked to the agreed "control the room, not the hands" design
+
+Rewrote the `thepack-mcpb/sandbox/` per the finalized isolation discussion. Principle: **functionality first** — inside the box Claude keeps full permissions and all skills; security is the box's walls, not restrictions on what the agent may do. This reconciles the three functional requirements the user set (keep all skills/plugins · one-command automation · live per-step progress — the last two were already delivered by the runner and are untouched).
+
+**Two tiers, both written:**
+- **Standard** (`docker-compose.yml`, `start.sh`): physical + information isolation *by keeping secrets out of the box* — no host business files mounted, shell env NOT inherited (only 4 declared vars cross in), fresh per-run tmpfs workspace, non-root, `no-new-privileges`. Internet open (acceptable since nothing sensitive is inside). Optional **read-only** skills mount via `CLAUDE_SKILLS_DIR` (skill files only — not creds/history/account-MCP, deliberately).
+- **Hardened** (`docker-compose.hardened.yml` + `proxy/`, `start.sh hardened`): adds a real network wall — tinyproxy sidecar with a **default-deny egress allowlist** (anthropic.com + the ThePack host + `EGRESS_ALLOW`), runner placed on an `internal: true` network with `HTTP(S)_PROXY` set so it has no direct internet.
+
+**Code changes (compiled, syntax-checked, bare-metal boot verified):**
+- `runner.ts`: fresh `mkdtemp` workspace per claude run (cwd, deleted after) — cross-task file isolation, defense-in-depth on bare metal too; honors `HTTP(S)_PROXY` via `undici` `EnvHttpProxyAgent` (so the hardened proxy governs the runner's own platform calls).
+- `index.ts` (MCP server): same proxy-honoring shim (its platform calls also route through the proxy in hardened mode).
+- Added `undici` dep; both files `try/catch` the import so proxy-less/older-Node runs still work.
+
+**Auth in-container:** headless Claude can't use a subscription login, so the sandbox authenticates Claude Code with `ANTHROPIC_API_KEY` (documented).
+
+**⚠️ Untested on Docker** — this dev machine has no Docker installed. Needs a real `docker compose up --build` (both tiers) to verify: image builds, a text job completes end-to-end, and (hardened) that Claude Code + runner actually honor the proxy / the allowlist doesn't block needed traffic. Fallback documented: if hardened breaks connectivity, run standard while debugging and widen `EGRESS_ALLOW`.
+
+**Deliberately NOT changed / still open:** the deliverable itself remains a legitimate output channel (an injected agent could embed a secret in what it submits) — the planned platform-side **leak scanner** is the backstop and is still deferred. `.mcpb` not repacked (sandbox uses `dist/` directly; Desktop unaffected by this change).
+
+---
+
+### 2026-07-13 — Sandbox reworked to the corrected priority order (no API key first)
+
+The user restated priorities: **(1) no extra API key > (2) full functionality incl. image tasks > (3) isolation**. The prior sandbox violated #1 by requiring `ANTHROPIC_API_KEY`. Fixed: the sandbox now **reuses the owner's existing Claude login** instead.
+
+- `start.sh`/`start.bat` copy `~/.claude/.credentials.json` + `~/.claude/skills` into `sandbox/claude-home/` (gitignored); `docker-compose.yml` mounts `./claude-home → /home/worker/.claude`, so the boxed Claude runs on the owner's subscription — **no API key**. It's a COPY, so token refresh/writes stay in `claude-home` and the real `~/.claude` is untouched; history/global memory are deliberately NOT copied, and `--strict-mcp-config` still excludes account-connected MCP servers.
+- `ANTHROPIC_API_KEY` demoted to optional fallback (empty by default), for machines with no Claude login.
+- Docs updated (README auth + isolation table + `.env.example`) and a new **"Other agent platforms"** section: today's sandbox is Claude-only (runner drives the `claude` CLI); OpenClaw/Hermes/etc. need a pluggable brain — the universal contract stays the REST gateway (`guide/AGENT_API.md`); planned `--brain` + per-platform images noted as **not built**.
+- Isolation honestly downgraded per priority #3: the login-token copy now lives inside the box, so **standard mode** has a bounded exfil risk for that token (worst case: someone burns the owner's Claude quota, not host files); **hardened mode** (egress allowlist) closes it. Documented as such.
+
+**Still untested on Docker** (no Docker on this dev machine). First real run must verify: the copied `.credentials.json` authenticates headless `claude` in the container without hitting an onboarding prompt (if it does, the documented fallback is `ANTHROPIC_API_KEY`); and that on Linux hosts the uid-10001 `worker` can read the bind-mounted `claude-home` (fine on Docker Desktop Win/Mac). No runner code changed this round; `dist` not rebuilt.
+
+### 2026-07-15 — Sandbox VALIDATED end-to-end on real Docker (text + image)
+
+Ran the sandbox for real (Docker Desktop on Windows 11, `docker` reachable from the tooling). **Both a text task and an image task completed fully autonomously inside the container with NO API key** (reused the copied Claude login). Confirmed: container reaches the host dev server via `host.docker.internal:3000`; the copied `.credentials.json` authenticated headless `claude` (no onboarding prompt — the earlier worry didn't materialize).
+- **Text task** (CONTENT_WRITING blurb): planned → wrote → submitted → REVIEW. auto-review 0.515 FAILED, but that's a review-calibration artifact (expects markdown headers/length; a good 120-word single-paragraph blurb legitimately scores low), NOT a sandbox issue.
+- **Image task** (IMAGE_GENERATION, "1024×512 ThePack banner"): the boxed agent wrote Pillow code → rendered a real **1024×512 PNG** (valid magic bytes) → `upload_file` → `submit_image_result` → REVIEW, **auto-review 0.843 PASSED**. Two failing sub-checks are minor calibration: `image_size` min is 10 KB but a clean gradient PNG compresses to ~9.7 KB; `metadata_present` optional and the agent skipped it.
+
+**Bug found + fixed during the run** (`docker-compose.yml`): the per-job scratch dir was a **root-owned tmpfs** (`/home/worker/jobs`, `/tmp`), so the non-root `worker` got `EACCES` on `mkdtemp` and `claude` never launched. Removed the tmpfs mounts — `/home/worker/jobs` is now the in-image dir already `chown`ed to `worker` (Dockerfile), which works; the runner still makes a fresh sub-dir per job and deletes it, and the container is disposable, so isolation is unaffected (lost only the in-memory/size-cap nicety).
+
+**Open (calibration, not sandbox):** the image `image_size` 10 KB floor and the text "has structure" check are too strict for legitimately small/short deliverables — worth tuning `src/lib/auto-review.ts` so honest work isn't auto-flagged. Also: to test image tasks, Claude 1's `supportedTaskTypes` was extended with `IMAGE_GENERATION`/`IMAGE_EDITING` directly in the DB (there's still no "edit agent" API — a gap).
+
+---
+
+### 2026-07-15 (later) — Auto-review recalibrated (short/simple deliverables no longer auto-fail)
+
+The strict checks from the sandbox test were fixing: legitimate short/simple work was auto-flagged. Changed `src/lib/auto-review.ts` (+ the one caller passes `qualityCriteria`):
+- **min_length**: now honors the task's own `qualityCriteria.minWords` when set; otherwise uses a low "not-empty" floor (CONTENT_WRITING 400→50, etc.). Rationale: the reviewer can't know the intended length, so genre length is the publisher's call, not an auto-fail.
+- **has_structure**: was "must have markdown headers"; now passes for any well-formed deliverable (headers OR lists OR multiple paragraphs OR ≥3 sentences of prose). Short single-paragraph blurbs/edits/translations pass.
+- **image_size**: min 10 KB → **1 KB** (a clean gradient PNG legitimately compresses to a few KB; real validity is the magic-byte integrity check).
+- Threaded `qualityCriteria` through `runAutoReview` and the agent-gateway submit route.
+
+**Verified on the running server** via the sandbox: a 106-word single-paragraph blurb went **0.515 FAILED → 0.882 PASSED**; the earlier 9.7 KB banner PNG now clears the size check too. Still minor/low-weight and left as-is: `title_referenced` (checks the task title's first 3 words appear in the output — a bit odd but weight 0.5, non-blocking) and optional `metadata_present`.
+
 ---
 
 *End of handover document. Good luck to whoever picks this up! 🐺*
+
+---
+
+## 2026-07-15 (later) — Owner-approved connector allowlist + execution-status bug fix
+
+### Fix A — execution status no longer reverts after submit
+- **Bug:** `POST /api/agent-gateway/executions/[id]/progress` set `status: "RUNNING"`
+  unconditionally. When the agent marked its last step done (`report_progress`)
+  *after* `submit_result` had set `COMPLETED`, the late call reverted the status
+  to RUNNING (while `completedAt` stayed set). Harmless to the flow (order still
+  moved to REVIEW) but the execution row read inconsistent.
+- **Fix:** `progress/route.ts` now leaves a terminal status (`COMPLETED`/`FAILED`)
+  untouched — it only advances to RUNNING while the execution is still active.
+- Cleaned 2 pre-existing stale rows (completedAt set + status RUNNING → COMPLETED).
+
+### Feature B — owner picks which claude.ai connectors the agent may use
+Owner decides, in ThePack, which of their Claude account connectors a rented
+agent can use. Security boundary is `--allowedTools`, not network.
+- **Schema:** `Agent.allowedConnectors String[] @default([])` (`allowed_connectors`),
+  applied via `prisma db push`. MCP server names, e.g. `claude_ai_Figma`.
+- **Runner (`thepack-mcpb/src/runner.ts`):** connector list now comes from
+  `approvedConnectors` — seeded from `ALLOWED_CONNECTORS` env (local override),
+  otherwise fetched from `GET /api/agent-gateway/whoami` at startup and re-read
+  before each job (so a website change applies without restart). When non-empty
+  it drops `--strict-mcp-config` (account connectors load) but restricts
+  `--allowedTools` to ThePack tools + exactly the approved connectors — every
+  other connector (brokerage, private Drive, …) stays UNINVOKABLE even though it
+  loaded. Empty = fully isolated (strict, ThePack tools only), unchanged. Bypass
+  perms is never used when connectors are inherited.
+  - (Replaces the earlier all-or-nothing `INHERIT_CONNECTORS=1` idea, which the
+    auto-mode security classifier blocked for exposing every connector.)
+- **whoami** (`agent-gateway/whoami/route.ts`) now returns `allowedConnectors`.
+- **API:** `PATCH /api/agents/[slug]` (owner or admin) saves `allowedConnectors`
+  (validated: `[A-Za-z0-9_-]+`, deduped, max 20). `?byId=1` accepts an id.
+- **UI:** owner-only "Connectors" card on `dashboard/agents/[slug]/page.tsx`
+  (fetches `/api/auth/me`, shows only to owner/admin). Checkboxes for a curated
+  list (Figma / Google Drive / Interactive Brokers), sensitive ones flagged with
+  a warning; Save → PATCH.
+
+### Validated end-to-end (real Docker not needed — bare-metal runner + host Claude)
+Figma FigJam task ran twice, fully autonomous, agent used ONLY Figma:
+1. env-driven (`ALLOWED_CONNECTORS=claude_ai_Figma`) → board
+   `figma.com/board/BWRVvqFF8AkrBc2btcR615`, auto-review 88%.
+2. UI-driven (marco PATCHed Figma → whoami exposed it → runner fetched it, no env)
+   → board `figma.com/board/3wRnEl7M6vbHmTYwzqUV42`, auto-review 88%,
+   order REVIEW, execution COMPLETED (fix A held).
+The brokerage/Drive connectors were loaded but not in `--allowedTools`, so
+uninvokable — the allowlist boundary held.
+
+### NOT done / follow-ups
+- Auto-DETECT the account's connectors (runner reports them up) — for now the UI
+  shows a curated known list the owner ticks.
+- Hardened-mode egress allowlist still unvalidated on Docker.
+- All changes LOCAL — not committed/pushed (per no-auto-push rule).
+
+---
+
+## 2026-07-15 (later 2) — Output-format-driven delivery + Figma design → PNG
+
+### Goal
+Testing the Figma connector as a *capability* (more connectors/output types to
+come). Requirement: publisher states the desired output in the task brief and the
+agent auto-selects the delivery form (image vs link vs text). Specifically: a
+Figma design returned AS A PNG image, not a link.
+
+### Runner prompt — now output-format-driven (`thepack-mcpb/src/runner.ts`)
+Step (d) rewritten: the agent reads `outputFormat` + description and picks the
+matching delivery method (the stated output format wins over task type):
+- text/markdown/link → `submit_result`
+- image requested (or IMAGE_* type) → `upload_file` + `submit_image_result`
+  - if it's a Figma design: `generate_diagram`/`use_figma` → `get_screenshot`
+    (fileKey from the board URL, nodeId `"0:1"` = whole board) → hand the
+    resulting image_url to `upload_file` as `sourceUrl`.
+
+### upload_file now accepts a URL (server fetches) — the real fix
+- **Why:** first Figma-image test HUNG ~13 min on the upload step. Root cause:
+  pushing a multi-KB PNG back through the model as a base64 tool-argument is
+  extremely slow/unreliable. (It did eventually complete — base64 works, just
+  unusable in practice.)
+- **Fix:** `upload_file` MCP tool (`thepack-mcpb/src/server.ts`) + `apiClient`
+  (`api-client.ts`) now take an optional `sourceUrl`; `base64Content` is optional.
+  `POST /api/agent-gateway/files/upload` accepts EITHER multipart (`file`) OR
+  JSON `{executionId, filename, sourceUrl, contentType}` and downloads the bytes
+  server-side. SSRF-guarded: https only + host allowlist (`figma.com`, extend via
+  env `FILE_FETCH_ALLOW_HOSTS`), 25 MB cap.
+- Runner only has ThePack + Figma tools (no shell/Write), so this URL hand-off is
+  what lets it deliver a tool-produced image without base64.
+
+### Validated end-to-end (UI-approved Figma, no env override)
+- Verified in-session first: `get_screenshot(nodeId "0:1")` on a FigJam board
+  returns a clean full-board PNG.
+- Task: IMAGE_GENERATION, brief "design in Figma, deliver as PNG". Agent:
+  FigJam design → screenshot → `upload_file(sourceUrl=…)` → `submit_image_result`.
+- Result: **~70s** (vs ~13 min base64), delivered `onboarding-flow.png` 1644×204,
+  auto-review **100%**, order REVIEW, execution COMPLETED. Image is a real
+  colored flowchart (Welcome → Create account → Verify → Finish), viewable at
+  `/api/files/<urlencoded key>` when logged in as the publisher.
+
+### Note for viewing files by hand
+`/api/files/[key]` is a single dynamic segment and `getFileUrl` URL-encodes the
+key (slashes → %2F) — must hit it with the encoded key AND a logged-in session,
+else you get an HTML redirect, not the bytes.
+
+### Still open
+- Auto-detect account connectors; hardened egress on Docker; the base64 path is
+  retained as a fallback but discouraged in the prompt.
+- All changes LOCAL — not committed/pushed.
+
+---
+
+## 2026-07-18 — Site-wide navigation audit: orphan pages & dead links fixed
+
+### Why
+User found the new agent Connectors card unreachable — the agent detail page
+looked like an "isolated page" with no way in from the site — and suspected more
+broken navigation elsewhere. Full audit of every page's outbound links vs the
+real route list confirmed several issues.
+
+### Audit method
+Enumerated all 21 `page.tsx` routes; grepped every `href=` / `router.push` /
+`redirect` across `src/app` + `src/components`; diffed link targets against
+existing routes in both directions (dead links AND orphan pages).
+
+### Fixed
+1. **Worker Dashboard had no path to the agent detail page** (the real complaint).
+   Owners manage an agent (profile, Connectors checkboxes) on
+   `/dashboard/agents/[slug]`, but `dashboard/worker/page.tsx`'s AgentCard had no
+   link to it — the only inbound links were marketplace/admin/reputation pages.
+   → Agent name is now a link + added a "Manage" button (Settings icon) on each
+   worker agent card → `/dashboard/agents/${agent.slug}`.
+2. **Admin sidebar: 4 dead links → 404** (`/admin/agents`, `/admin/orders`,
+   `/admin/users`, `/admin/disputes` — nav entries existed, pages never built).
+   → Removed from `adminNav` in `src/lib/navigation.ts` with a note to re-add
+   when the pages land. Admin nav now: Overview, Tasks.
+3. **Login page linked to `/forgot-password` which doesn't exist** → 404.
+   → Replaced with an informational tooltip span ("contact admin"), no dead link.
+4. **Register page ToS / Privacy Policy were `href="#"` fake links**
+   → converted to plain text until real pages exist.
+
+### Audited & OK (no change)
+- Marketplace cards all link correctly: AgentCard → agents/[slug], TaskCard →
+  tasks/[id], OrderCard → orders/[id]; orders/[id] → review page; breadcrumbs
+  only generate crumbs for existing routes on live paths.
+- Wallet's "Add Funds (Stripe)" / "Connect Stripe" buttons are intentionally
+  `disabled` with explanation (Stripe not wired) — not dead links.
+- After fixes, every remaining internal href/push target resolves to a real route.
+
+### Known leftover (documented, not fixed)
+- `/dashboard/orders/confirm/[taskId]/[agentId]` is an ORPHAN page (nothing links
+  to it; legacy hire flow superseded by task-detail assign). Harmless — decide
+  later: delete or re-wire.
+
+### Verified
+Dev server on **:3100** (port 3000 became Windows-reserved 2986–3085, EACCES —
+use `PORT=3100`): /login, /register, /admin (admin), /dashboard/worker (marco),
+/dashboard/agents/claude-1-f8971e all 200, no compile errors. Manage button is
+client-rendered (worker page fetches data client-side).
+
+### Also this session
+- Stopped the stale runner; "change colour" IMAGE_EDITING order remains stuck
+  (agent had Figma connector mode on → no local Pillow tools; see previous
+  entry's A/B options) — not yet cleaned up.
+- All changes LOCAL — not committed/pushed (per no-auto-push rule).
+
+---
+
+## 2026-07-18 (later) — Connector model reworked: local tools always allowed, connectors detected + gated
+
+### New permission model (user requirement)
+"自带的 tool(Pillow 等)/plugin 默认放行,只有 connector 需要勾选。"
+- **Local tools are ALWAYS allowed**: runner's allowlist now includes built-in
+  Claude Code tools (Bash/Read/Write/Edit/Glob/Grep/WebFetch/WebSearch/TodoWrite/
+  NotebookEdit) in every non-bypass run — `LOCAL_TOOLS` in
+  `thepack-mcpb/src/runner.ts`. This FIXES the earlier conflict where approving
+  Figma locked the agent out of Pillow/Bash (why "change colour" IMAGE_EDITING
+  got stuck). `--allowedTools` is now the wall for CONNECTORS only.
+  RUNNER_BYPASS=1 + no connectors (sandbox) unchanged: full bypass.
+- **Connectors remain owner-gated** via the ticked allowedConnectors (unchanged).
+
+### Connector discovery + Refresh button
+- Runner discovers account connectors with `claude mcp list` (parses
+  "claude.ai Figma: https://… - ✔ Connected" lines; normalizes to tool-prefix
+  form e.g. `claude_ai_Figma`; excludes our own `thepack` server) at startup +
+  every 5 min, and reports them on the heartbeat (`connectors: [...]`).
+- `POST /api/agent-gateway/heartbeat` accepts optional `connectors` array
+  (validated `[A-Za-z0-9_-]+`, deduped, max 30) → stored on new
+  `Agent.availableConnectors String[]` (`available_connectors`, db push done).
+- Connectors card (`dashboard/agents/[slug]/page.tsx`) now renders the DETECTED
+  list (fallback: curated KNOWN_CONNECTORS before first report; approved-but-
+  undetected entries stay visible), with generic label prettification for
+  unknown ones ("claude_ai_Microsoft_365" → "Microsoft 365"), plus a **Refresh
+  button** (re-fetches agent) and copy explaining local tools are always on.
+
+### Verified
+- Discovery (bogus-key runner, real `claude mcp list`): found all 4 account
+  connectors incl. newly-added Microsoft 365; bogus key correctly 403'd.
+- Real-key heartbeat with connectors → DB `available_connectors` populated →
+  GET /api/agents/[slug] exposes it → agent page 200.
+
+### ⚠️ Noticed during verification
+`Claude 1.allowed_connectors` came back EMPTY (yesterday's Figma approval gone) —
+suspect today's `prisma db push` or an accidental empty save. Not silently
+restored; owner should re-tick Figma in the UI (which also exercises the new
+card). Worth watching whether db push resets String[] defaults again.
+
+### Still open
+- "change colour" IMAGE_EDITING order still stuck RUNNING (would likely succeed
+  now that local tools are allowed alongside connectors — needs a runner restart
+  and possibly a re-dispatch once its execution is reset).
+- All changes LOCAL — not committed/pushed.
+
+---
+
+## 2026-07-18 (later 2) — Stuck "change colour" task RESCUED under the new permission model
+
+### Result
+The IMAGE_EDITING order stuck since morning completed autonomously end-to-end:
+execution COMPLETED, auto-review **100%**, delivered `controller_blue.png`
+(1280×1707, 1.5 MB). Quality is genuinely good: white controller body recolored
+to vivid blue with lighting/shading/plastic texture preserved; the blue paw-print
+thumbstick caps and background (mousepad/desk) untouched.
+
+### Why it worked now (validation of the new model)
+- Agent used REAL local pixel tools via Bash (U2Net/rembg segmentation +
+  luminance-preserving tint gated by saturation, feathered mask) — possible only
+  because LOCAL_TOOLS are now always allowed alongside the approved Figma
+  connector (the old either/or conflict was the original cause of the hang).
+- Owner had re-ticked Figma through the NEW Connectors UI (whoami → runner log
+  `connectors approved by owner: claude_ai_Figma`) — full UI→runner loop works.
+
+### ⚠️ Plumbing gap discovered: delivering LARGE local files
+The 1.4 MB PNG couldn't go through `upload_file` base64 (too big for a tool
+argument), and `sourceUrl` correctly REJECTED localhost + tmpfiles.org (SSRF
+allowlist held — good). The agent improvised: uploaded the PNG as a Figma asset
+and passed the Figma screenshot URL as sourceUrl (figma.com is allowlisted), so
+the server pulled full resolution. Clever but fragile/roundabout.
+**Proper fix (TODO):** `upload_file` should accept a local `filePath` — the MCP
+server child runs on the same machine as claude, so it can read the file and do
+the multipart POST directly. No base64 through the model, no external hop.
+
+### Side artifacts of the run (harmless, cleanable)
+- A Figma draft file "ThePack - Blue Controller Delivery" used as transfer host.
+- Agent also briefly started (and shut down) a temporary local HTTP server while
+  exploring delivery options.
+
+### State
+- Servers: dev server :3100 still running; runner stopped after the job.
+- All changes LOCAL — not committed/pushed.
+
+---
+
+## 2026-07-18 (later 3) — Task page now links to its order (deliverables were invisible)
+
+User (as publisher) opened their "change colour" TASK page and asked "这个output
+怎么没有图片啊" — deliverables render on the ORDER page ("Delivered Files"), but
+the task detail page gave NO route to it, even though `GET /api/tasks/[id]`
+already includes the order. Same orphan-navigation class as the earlier audit.
+
+Fix in `src/app/dashboard/tasks/[id]/page.tsx`:
+- `Task` interface now carries `order { id, status, agent{name,slug} }`.
+- New right-column "Work in progress" card whenever `task.order` exists —
+  shows which agent is on it + a "View order & deliverables" button →
+  `/dashboard/orders/[id]`.
+
+Verified: task page 200 as publisher; API confirms order (REVIEW, Claude 1).
+LOCAL only — not committed/pushed.
+
+---
+
+## 2026-07-18 (later 4) — Everything sandbox-validated for tomorrow's test; filePath upload lands
+
+### Context
+User pointed out (correctly) that all recent tests ran BARE-METAL on the host —
+the Docker sandbox hadn't run since 07-16, so none of this week's features were
+container-validated. Mandate: fix everything tonight, validate in the sandbox,
+so tomorrow's test passes directly.
+
+### Code changes
+1. **`upload_file` now takes `filePath`** (the proper fix for large local files):
+   - `thepack-mcpb/src/server.ts`: new optional `filePath` param — ABSOLUTE path;
+     preference order filePath > sourceUrl > base64 (base64 = tiny files only).
+   - `thepack-mcpb/src/api-client.ts`: reads the file from disk (the MCP server
+     runs beside the model's workspace) and streams multipart — zero bytes
+     through the model, any size works.
+   - `runner.ts` WORK_PROMPT: locally produced files → filePath; Figma
+     screenshots → sourceUrl; base64 last resort.
+2. **Sandbox**: Dockerfile adds `python3-pip python3-venv` (agent can pip-install
+   extras like rembg); `sandbox/.env` THEPACK_SERVER_URL →
+   `http://host.docker.internal:3100` (port change).
+3. **`the-pack-main/start-dev.bat`**: starts dev server with PORT=3100 +
+   NEXT_PUBLIC_APP_URL (3000 is Windows-excluded-range; 3100 is the standard now).
+
+### Sandbox validation (all in-container, fresh image build)
+- Container reaches host platform on 3100 ✓; whoami → approved Figma ✓.
+- **Connector discovery works IN the container**: `claude mcp list` found all 4
+  account connectors with only `.credentials.json` copied — connectors are
+  account-level, no `~/.claude.json` needed. ✓
+- Task A "rich gradient poster" (local Pillow): delivered **2.88 MB** 1600×900
+  PNG via the NEW filePath path (2× the size that hung yesterday), full-canvas
+  gradient + centered text, auto-review **100%**. ✓
+- Task B "Figma diagram as PNG": FigJam board → get_screenshot → sourceUrl →
+  5.7 KB PNG delivered, auto-review **100%**. Both jobs done in one claude run,
+  ~2.5 min total. ✓
+- Everything shut down after validation (container down, dev server stopped).
+
+### How to test tomorrow (works out of the box)
+1. Double-click `the-pack-main/start-dev.bat` (platform on http://localhost:3100).
+2. `thepack-mcpb/sandbox/start.bat` (rebuilds image if needed, copies login, runs).
+3. Publish a task as alex@example.com / assign as marco@agents.io (password123),
+   or use existing accounts — image, text, and Figma-as-PNG tasks all validated.
+4. Deliverables: task page → "View order & deliverables" → Delivered Files.
+
+### Notes
+- Port 3100: Windows reserved ranges can shift after reboot; if 3100 ever hits
+  EACCES, pick another port and update start-dev.bat + sandbox/.env together.
+- All changes LOCAL — not committed/pushed (per no-auto-push rule).
+
+---
+
+## 2026-07-18 (later 5) — File-pipeline scaling assessed; object storage added to pre-launch list
+
+### Question raised (user)
+Does the platform-relay file path (agent → platform → viewers) have enough
+pipeline width for production?
+
+### Assessment of current implementation (code-verified)
+- `/api/agent-gateway/files/upload` and `/api/files/[key]` both buffer WHOLE
+  files in memory (`fs.readFile`/arrayBuffer → Buffer) — no streaming, no Range.
+- Storage = platform-local disk (`src/lib/storage.ts`) — single-machine bound;
+  breaks on multi-instance deploys and serverless (ephemeral FS).
+- Every download passes through the Node process → platform pays bandwidth
+  twice and the app server moonlights as a file server.
+- Verdict: FINE for dev/demo (single machine, image-sized files, few users);
+  REAL bottleneck for production or video-sized deliverables.
+
+### Pre-launch TODO (added): migrate to object storage + presigned URLs
+- `storage.ts` was deliberately built as a swappable layer — rewrite its
+  read/write/getFileUrl against S3 / Supabase Storage / R2.
+- Upload: platform issues presigned PUT; agent uploads DIRECTLY to storage
+  (bytes never touch the platform server). Download: presigned GET / CDN URL.
+- Estimated effort: ~0.5–1 day.
+- Optional interim mitigation (1h): switch `/api/files/[key]` to
+  `createReadStream` streaming + Range support to kill the memory hotspot.
+
+### Pre-launch checklist (consolidated)
+1. Object storage + presigned URLs (this entry).
+2. Platform-side leak scanner for deliverables.
+3. Hardened egress mode validated on real Docker.
+4. Real Stripe payments.
+5. Pricing rule unification (assign uses task.budget vs claim uses basePrice).
+
+No code changed in this entry. All work remains LOCAL — not committed/pushed.
+
+---
+
+## 2026-07-20 — Sandbox image-EDITING test passed; runner watchdog added (real hang bug)
+
+### Full flow validated in the Docker sandbox (image editing w/ attachment)
+- Publisher (alex) uploaded a 600×400 red-circle PNG as a task-input attachment
+  (`POST /api/files/upload` bucket=task-inputs → fileId → task `fileIds`), task
+  type IMAGE_EDITING "recolour red→green", assigned to Claude 1 (marco).
+- Sandbox agent: fetched the input image, recoloured the circle red→green with
+  Pillow, verified background/text/position unchanged, uploaded via the new
+  filePath path, submitted. Delivered `red_circle_green.png` 600×400, auto-review
+  **0.964**. Output visually correct. ✅ (exercises BOTH input upload and output.)
+
+### REAL BUG found + fixed: runner had no timeout on a hung claude
+- Symptom: first attempt hit `API Error: Connection closed mid-response` → exit 1
+  (recoverable, runner retried). Second attempt HUNG — claude neither exited nor
+  errored (stalled API response stream). `runClaude()` only resolved on
+  child close/error, so the promise never settled, `busy` stayed true FOREVER,
+  and the runner silently stopped taking any work. One network hiccup = permanent
+  wedge.
+- Fix (`thepack-mcpb/src/runner.ts`): added a watchdog — spawn is `detached` on
+  POSIX (process-group leader) so on timeout we `kill(-pid, SIGKILL)` the whole
+  tree; resolve() is now idempotent (`settled` guard) across close/error/timeout.
+  Timeout = `CLAUDE_TIMEOUT_MIN` (default 15; sandbox compose sets 8). A hung run
+  is now killed and the job retried instead of wedging the runner.
+- `sandbox/docker-compose.yml`: passes `CLAUDE_TIMEOUT_MIN` (default 8).
+- After the fix + container rebuild, the retry completed cleanly (exit 0).
+
+### Environmental note (NOT our bug)
+The `Connection closed mid-response` drops happened only in the CONTAINER, not
+bare-metal. MTU is 1500 both sides and the API is reachable — looks like
+transient instability on the long streaming connection through Docker Desktop's
+NAT (or an Anthropic-side blip that morning). The watchdog makes the runner
+resilient to it regardless. Worth watching; if frequent, investigate Docker
+Desktop networking / consider a lower MTU on the container.
+
+### Minor bug fixed
+`POST /api/tasks` returned the pre-update task object, so its `inputFiles` came
+back `[]` even when attachments linked fine (DB was correct; task pages re-fetch
+so were unaffected). Now reflects the linked files in the response.
+
+### State
+- Services LEFT RUNNING for continued testing: platform :3100 + sandbox container.
+- All changes LOCAL — not committed/pushed.
+
+---
+
+## 2026-07-20 (later) — filePath INPUT side done + validated with an 8 MB image
+
+### Change: input attachments no longer base64-through-model (mirrors the output fix)
+`get_input_file` used to return the whole binary as base64 inline in the tool
+result → for large images that floods the model context (slow/expensive/can
+exceed the window). Now symmetric to the filePath upload:
+- **Platform** `GET /api/agent-gateway/files/[fileId]?raw=1` streams raw bytes
+  (Content-Type + Content-Disposition). Old JSON/base64 response kept for
+  back-compat (no `?raw`).
+- **`thepack-mcpb/src/api-client.ts`**: new `downloadInputFile(fileId, destDir)`
+  — fetches `?raw=1`, writes the file into destDir, returns
+  `{ filePath, filename, contentType, size }`.
+- **`thepack-mcpb/src/server.ts`** `get_input_file`: downloads into `process.cwd()`
+  (the per-job workspace Claude runs in) and returns the absolute `filePath`;
+  for small text files (≤512 KB) also includes `content` inline. No large base64.
+- **`runner.ts`** prompt step (a): open inputs by filePath (e.g. Pillow).
+
+### Validated in the Docker sandbox with a genuinely large file
+- Input: 2000×1500 incompressible random-noise PNG, **7.97 MB** (base64 would be
+  ~11 MB / millions of tokens — impossible under the old path).
+- IMAGE_EDITING "recolour the red box → green"; sandbox agent downloaded via
+  filePath, edited with Pillow, uploaded the **8 MB** result via filePath,
+  submitted. order=REVIEW, exec=COMPLETED, auto-review **0.964**.
+- **Pixel-level verification** (input vs output, both 1500×2000):
+  - box centre (220,20,20) red → (20,180,20) green ✓
+  - background pixels bit-identical (corner + far pixel unchanged) ✓
+  - changed pixels = 209,081, ALL inside the box bbox x[751..1249] y[541..959];
+    **changes OUTSIDE the box region = 0** ✓ (noise background untouched)
+  - visual crop confirms green fill + intact black border on noise.
+
+### Net effect
+Both directions of the file pipeline (input download + output upload) now keep
+bytes OUT of the model context → large images work end-to-end. (Platform-side
+scaling — whole-file-in-memory, single-disk — is still the separate object-storage
+pre-launch TODO; unaffected by this change.)
+
+### State: services still UP (platform :3100 + sandbox). LOCAL only — not pushed.

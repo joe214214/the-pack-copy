@@ -26,13 +26,27 @@ export function createServer() {
             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
         }
     });
-    // 0b2. get_input_file — read a task attachment's content
-    server.tool("get_input_file", "Fetch the content of a task attachment (input file). Use the file `id` from the job's inputFiles list. Text files return utf8 content; binary files return base64.", {
+    // 0b2. get_input_file — download a task attachment INTO the workspace
+    server.tool("get_input_file", "Fetch a task attachment (input file) by its `id` from the job's inputFiles. The file is DOWNLOADED to your working directory and its absolute `filePath` is returned — open it directly with your tools (e.g. Pillow/ffmpeg) using that path. Do NOT expect large binaries as base64. For text files the utf8 `content` is also included inline for convenience.", {
         fileId: z.string().describe("The id of the input file (from inputFiles in get_assigned_jobs / get_task_detail)")
     }, async (params) => {
         try {
-            const result = await apiClient.getInputFile(params.fileId);
-            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+            // Save into the current working directory — the runner launches Claude
+            // with cwd = the per-job workspace, which this MCP child inherits.
+            const f = await apiClient.downloadInputFile(params.fileId, process.cwd());
+            const TEXT = ["text/", "application/json", "application/xml", "image/svg+xml"];
+            const isSmallText = TEXT.some((t) => f.contentType.startsWith(t)) && f.size <= 512 * 1024;
+            const out = {
+                filePath: f.filePath,
+                filename: f.filename,
+                contentType: f.contentType,
+                size: f.size,
+            };
+            if (isSmallText) {
+                const { readFileSync } = await import("node:fs");
+                out.content = readFileSync(f.filePath, "utf8");
+            }
+            return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
         }
         catch (e) {
             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
@@ -168,14 +182,16 @@ export function createServer() {
         }
     });
     // 5b. upload_file — upload a binary file during execution (for image tasks)
-    server.tool("upload_file", "Upload a binary file (image, PDF, etc.) during task execution. Provide the file content as a base64 string. Returns a fileId that you can pass to submit_result or submit_image_result. Use this for IMAGE_GENERATION or IMAGE_EDITING tasks to submit the produced images.", {
+    server.tool("upload_file", "Upload a binary file (image, PDF, etc.) during task execution. Returns a fileId to pass to submit_result or submit_image_result. Three ways to provide the bytes, in order of preference: (1) `filePath` — ABSOLUTE path of a file you produced in your workspace; this server reads it from disk directly, so it works for files of ANY size (always use this for locally created files). (2) `sourceUrl` — an https URL a tool handed you (e.g. a Figma get_screenshot asset URL); the platform downloads it. (3) `base64Content` — only for tiny files (<100 KB); never paste large base64. Give exactly one of the three.", {
         executionId: z.string().describe("The execution ID of the current job"),
         filename: z.string().describe("Filename including extension, e.g. 'result.png'"),
-        base64Content: z.string().describe("Base64-encoded file content"),
+        filePath: z.string().optional().describe("ABSOLUTE path to a local file you created (e.g. '/home/worker/jobs/job-x/result.png'). Preferred for anything you produced locally — any size works."),
+        base64Content: z.string().optional().describe("Base64-encoded file content. Only for tiny files; omit if you pass filePath or sourceUrl."),
+        sourceUrl: z.string().optional().describe("An https URL the server should download the file from (e.g. a Figma screenshot asset URL). Preferred for tool-hosted files."),
         contentType: z.string().describe("MIME type of the file, e.g. 'image/png', 'image/jpeg', 'image/webp'")
     }, async (params) => {
         try {
-            const result = await apiClient.uploadFile(params.executionId, params.filename, params.base64Content, params.contentType);
+            const result = await apiClient.uploadFile(params.executionId, params.filename, params.base64Content || "", params.contentType, params.sourceUrl, params.filePath);
             return {
                 content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
             };

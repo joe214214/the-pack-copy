@@ -41,6 +41,31 @@ export const apiClient = {
     return request<any>(`/api/agent-gateway/files/${fileId}`);
   },
 
+  // Download an input attachment's raw bytes and write them into `destDir`,
+  // returning the local path. Keeps large binaries OUT of the model's context —
+  // Claude opens the file by path (mirrors the filePath upload on the way out).
+  async downloadInputFile(fileId: string, destDir: string) {
+    const config = getConfig();
+    const url = `${config.serverUrl.replace(/\/$/, "")}/api/agent-gateway/files/${fileId}?raw=1`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${config.agentKey}` } });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(`Download failed [${res.status}]: ${err.error || res.statusText}`);
+    }
+    const contentType = (res.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
+    const cd = res.headers.get("content-disposition") || "";
+    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^"]+)"?/i);
+    const rawName = m ? decodeURIComponent(m[1]) : `input-${fileId}`;
+    const safeName = rawName.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "") || `input-${fileId}`;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const path = await import("node:path");
+    mkdirSync(destDir, { recursive: true });
+    const filePath = path.join(destDir, safeName);
+    writeFileSync(filePath, buf);
+    return { filePath, filename: safeName, contentType, size: buf.length };
+  },
+
   async setTaskPlan(executionId: string, steps: string[]) {
     return request<any>(`/api/agent-gateway/executions/${executionId}/plan`, {
       method: "POST",
@@ -82,11 +107,65 @@ export const apiClient = {
     });
   },
 
-  async uploadFile(executionId: string, filename: string, base64Content: string, contentType: string) {
+  async uploadFile(
+    executionId: string,
+    filename: string,
+    base64Content: string,
+    contentType: string,
+    sourceUrl?: string,
+    filePath?: string
+  ) {
     // Upload a file to storage and get back a fileId.
     // Uses the agent-gateway file upload endpoint (Bearer auth).
     const config = getConfig();
     const url = `${config.serverUrl.replace(/\/$/, "")}/api/agent-gateway/files/upload`;
+
+    // Preferred for LOCALLY produced files of any size: this MCP server runs on
+    // the same machine as the model's workspace, so it can read the file from
+    // disk and stream it up as multipart — zero bytes through the model. This
+    // is what makes large deliverables (multi-MB images, PDFs, …) practical.
+    if (filePath) {
+      const { readFileSync } = await import("node:fs");
+      let bytes: Buffer;
+      try {
+        bytes = readFileSync(filePath);
+      } catch (e: any) {
+        throw new Error(`Cannot read filePath "${filePath}": ${e.message}`);
+      }
+      const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
+      const formData = new FormData();
+      formData.append("file", blob, filename);
+      formData.append("executionId", executionId);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${config.agentKey}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(`Upload failed [${response.status}]: ${err.error || response.statusText}`);
+      }
+      return response.json();
+    }
+
+    // Preferred for tool-produced files (e.g. Figma screenshots): hand the
+    // server a URL and let IT download the bytes — no multi-KB base64 through
+    // the model.
+    if (sourceUrl) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.agentKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ executionId, filename, sourceUrl, contentType }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(`Upload failed [${response.status}]: ${err.error || response.statusText}`);
+      }
+      return response.json();
+    }
 
     // Convert base64 to Uint8Array for the FormData blob
     const binaryString = atob(base64Content);
