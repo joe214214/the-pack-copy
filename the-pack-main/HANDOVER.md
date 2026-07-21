@@ -1727,3 +1727,98 @@ Desktop account skills (`%LOCALAPPDATA%\Packages\Claude_*\…\skills-plugin`) in
 claude-home/skills (dedup by name, latest-wins); start.bat/start.sh call it.
 
 ### LOCAL only — nothing committed before this commit. Services stopped.
+
+## 2026-07-20 (later 4) — Skill A/B #2: apple-design (Desktop skill) in the SANDBOX
+
+### What & why
+Second skill A/B, this time proving a Claude **Desktop account** skill reaches the
+container (via collect-skills.ps1) AND changes the deliverable. Task chosen to
+maximise visible difference: an interactive iOS-style **bottom sheet** (single
+self-contained index.html). Brief stated WHAT (a sheet you drag up/down, flick to
+dismiss, smooth/polished) but NOT HOW (no mention of springs/momentum/materials),
+so any fluid-motion technique is the skill's own contribution. Both runs went
+through the real Docker sandbox + delivery pipeline.
+
+### Setup (clean A/B, same container)
+- Baseline (task [noskill]): claude-home/skills EMPTY.
+- Skill (task [appleskill]): ran collect-skills.ps1 → pulled 13 skills incl
+  apple-design from the Claude Desktop package path; container saw apple-design.
+- Both delivered as index.html, type=text/html (preview pipeline works end-to-end).
+
+### Result — skill discovered & applied ✅ (code fingerprints, same brief)
+| fingerprint            | no-skill | apple skill |
+| requestAnimationFrame  |    0     |    2   |
+| velocity               |    0     |   14   |
+| spring                 |    0     |    4   |
+| backdrop-filter (glass)|    0     |    5   |
+| will-change            |    0     |    2   |
+| CSS transition         |    4     |    1   |
+| cubic-bezier           |    1     |    0   |
+Skill version wrote a real spring solver (springTo w/ damping+response),
+estimateVelocity() from pointer history, the WWDC momentum-projection formula
+project(v,decel)=v/1000*decel/(1-decel), iOS rubberband() boundary resistance,
+velocity-based flick detection (releaseVelocity>300 => dismiss), and frosted-glass
+material. Baseline = fixed-duration CSS transition + class toggle, left-aligned flat
+white sheet. Visual: skill = iOS grouped inset table, right-aligned values, pill
+button, translucent material; baseline = plain white sheet. Motion (momentum/
+interruptible spring) only observable live — headless stills can't freeze the JS
+spring (itself evidence it's physics-driven, not a CSS snap).
+
+### Artifacts (scratchpad): sheet_noskill.html / sheet_skill.html, shot_*.png.
+### Orders: [noskill]=cmord396901a0db2730db85c3245d [skill]=cmorde2ecbf147129afdcd48a22db
+### Sandbox delivery pipeline validated end-to-end. Services left UP for cross-machine test. Nothing committed.
+
+## 2026-07-20 (later 5) — Skill A/B #3: apple-design on a FULL landing page
+
+### Why
+Bottom-sheet A/B showed a big diff but few elements. Richer test: a complete
+"Cadence" marketing landing page (nav/hero/features/stats/pricing/CTA/footer),
+single self-contained index.html. Same rules: brief = content only, no style words.
+Clean isolation: skill run had ONLY apple-design in the sandbox (not the full 13).
+
+### Result — visible stylistic difference, subtler than the interactive case
+Both pages are complete & professional (base model is strong). apple-design's mark
+on a STATIC page = RESTRAINT + typographic discipline, not more decoration:
+- Color: no-skill leans on a loud violet gradient everywhere; skill uses a neutral
+  warm-grey canvas + ONE blue accent, gradients used sparingly.
+- Pro pricing card: no-skill = purple-outlined white card; skill = solid BLACK
+  high-contrast card (classic Apple premium signaling).
+- Bands: no-skill = bright violet stats + dark glowy CTA; skill = restrained deep-navy
+  stats + calm soft-lavender CTA.
+- Typography: skill letter-spacing count 14 vs 8 (tracking discipline).
+- Interaction: skill explicitly wrote spring-based press feedback (scale(.97) on
+  :active, lift+shadow) per the skill; only felt on click.
+Fingerprints (noSkill/skill): backdrop-filter 1/2, cubic-bezier 0/1, transition 7/9,
+letter-spacing 8/14, linear-gradient 6/7, box-shadow 13/16. Sizes ~24KB each.
+
+### Takeaway for positioning
+apple-design pays off MOST on interactive/motion work (bottom sheet: real spring
+physics, momentum, rubber-band — objective, dramatic). On static visual pages its
+value is real but taste-based: restraint, color discipline, typographic tracking,
+strategic high-contrast. Pitch skills accordingly per task type.
+
+### Orders: landing[noskill]=cmord988e41f649b229ea7df15ef9  landing[skill]=cmorde8b401818a05f5d853b695ff
+### Artifacts: land_noskill.html/land_skill.html, page_noskill.png/page_skill.png (scratchpad). Services UP. Nothing committed.
+
+## 2026-07-20 (later 6) — New task type: CUSTOM (unrestricted output)
+
+### Why
+A general-purpose task type for testing/anything: the publisher defines the
+deliverable, no output-format restriction (HTML page, code file, image, mixed
+text+files — whatever the brief/outputFormat says).
+
+### Changes
+- prisma/schema.prisma: enum TaskType += CUSTOM; DB `ALTER TYPE "TaskType" ADD
+  VALUE 'CUSTOM'` applied; `npx prisma generate` (client + enums.ts updated).
+- src/lib/task-types.ts: TaskTypeId += CUSTOM; TASK_TYPES entry "Custom Task"
+  (Sparkles icon, acceptsInputFiles, NO outputFileTypes) → auto-appears in the
+  task wizard with the free-text "Expected Output Format" field (no restriction).
+- src/app/api/tasks/route.ts: createTaskSchema zod enum += CUSTOM.
+- src/app/api/agents/route.ts: agent supportedTaskTypes zod list += CUSTOM.
+- src/lib/auto-review.ts: early CUSTOM branch — lenient review (only output_exists
+  + no error markers; passes any format). Publisher review is the real gate.
+- Runner needs NO change: it already delivers by the brief/outputFormat
+  ("publisher's stated output format wins over the task type").
+- DB: added CUSTOM to Claude 1 agent supported+accept task types (for testing).
+
+### tsc --noEmit clean. Committed to feature/ui-html-delivery-preview.

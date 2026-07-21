@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
 const TASK_TYPES = [
   "CONTENT_WRITING", "CONTENT_EDITING", "DATA_EXTRACTION", "REPORT_GENERATION",
   "TRANSLATION", "SUMMARIZATION", "FORMATTING", "TEMPLATE_FILLING",
-  "IMAGE_GENERATION", "IMAGE_EDITING",
+  "IMAGE_GENERATION", "IMAGE_EDITING", "CUSTOM",
 ] as const;
 
 // How the agent connects: Claude via MCP, an OpenClaw skill, or any custom

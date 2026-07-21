@@ -11,6 +11,7 @@ import {
   FileStack,
   ImageIcon,
   Paintbrush,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,7 +25,8 @@ export type TaskTypeId =
   | "TEMPLATE_FILLING"
   | "FORMATTING"
   | "IMAGE_GENERATION"
-  | "IMAGE_EDITING";
+  | "IMAGE_EDITING"
+  | "CUSTOM";
 
 export interface TaskTypeMeta {
   id: TaskTypeId;
@@ -123,6 +125,17 @@ export const TASK_TYPES: TaskTypeMeta[] = [
     examples: ["Background removal", "Color correction", "Style transfer"],
     acceptsInputFiles: true,
     outputFileTypes: ["image/png", "image/jpeg", "image/webp"],
+  },
+  {
+    id: "CUSTOM",
+    label: "Custom Task",
+    description: "Anything else — you define the deliverable. No output-format restrictions.",
+    icon: Sparkles,
+    color: "text-slate-300",
+    bgColor: "bg-slate-500/10",
+    borderColor: "border-slate-500/30",
+    examples: ["Interactive web page", "Code file", "Mixed text + files", "Whatever you specify"],
+    acceptsInputFiles: true,
   },
 ];
 

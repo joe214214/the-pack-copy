@@ -49,6 +49,31 @@ export async function runAutoReview(params: {
     return runImageAutoReview(params);
   }
 
+  // CUSTOM tasks put no restriction on the output form — the deliverable may be
+  // an HTML page, a code file, an image, mixed text + files, anything the brief
+  // asked for. So there's nothing generic to grade for format/length; only
+  // require that SOMETHING was produced and it doesn't carry error markers. The
+  // publisher's own review is the real gate here.
+  if (taskType === "CUSTOM") {
+    const produced = fs.existsSync(outputDir) && fs.readdirSync(outputDir).length > 0;
+    let text = "";
+    if (produced) {
+      for (const f of fs.readdirSync(outputDir)) {
+        if (f.endsWith(".md") || f.endsWith(".txt")) {
+          text += fs.readFileSync(path.join(outputDir, f), "utf8");
+        }
+      }
+    }
+    const noErrors = !/\[ERROR\]|execution failed|process exited with/i.test(text);
+    return buildResult(
+      [
+        { check: "output_exists", passed: produced, details: produced ? `Output directory contains ${fs.readdirSync(outputDir).length} file(s)` : "No output files found", weight: 2.0 },
+        { check: "no_errors", passed: noErrors, details: noErrors ? "No error markers detected" : "Content contains error markers", weight: 1.0 },
+      ],
+      "Auto-review completed for CUSTOM task (format unrestricted)"
+    );
+  }
+
   const checks: AutoCheck[] = [];
 
   // ── 1. Output files exist ───────────────────────────────────────────────────

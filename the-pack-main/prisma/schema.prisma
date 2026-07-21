@@ -37,6 +37,7 @@ enum TaskType {
   TEMPLATE_FILLING
   IMAGE_GENERATION
   IMAGE_EDITING
+  CUSTOM
 }
 
 enum TaskStatus {

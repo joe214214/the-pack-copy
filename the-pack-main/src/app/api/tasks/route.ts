@@ -71,6 +71,7 @@ const createTaskSchema = z.object({
     "FORMATTING",
     "IMAGE_GENERATION",
     "IMAGE_EDITING",
+    "CUSTOM",
   ]),
   title: z.string().min(5).max(200),
   description: z.string().min(20).max(5000),
