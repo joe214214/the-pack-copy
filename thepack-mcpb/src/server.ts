@@ -182,23 +182,25 @@ export function createServer() {
   // 4. submit_result
   server.tool(
     "submit_result",
-    "Submit the final result for a task execution",
+    "Submit the final result for a task execution. For a text deliverable put it in `result`. For a FILE deliverable (a web page/HTML, PDF, doc, …) first upload_file it and pass the returned id(s) in `fileIds` — the file is attached to the delivery and the publisher can open/preview or download it.",
     {
       executionId: z.string().describe("The execution ID provided when the task was claimed"),
-      result: z.string().describe("The main textual result or markdown output"),
+      result: z.string().describe("The main textual result or markdown output (a short description is fine when the deliverable is a file)"),
       outputFiles: z.array(z.object({
         name: z.string(),
         content: z.string()
-      })).optional().describe("Any additional output files"),
+      })).optional().describe("Small inline text files as {name, content}"),
+      fileIds: z.array(z.string()).optional().describe("IDs returned from upload_file — attaches already-uploaded files (e.g. an index.html) to this delivery"),
       metadata: z.record(z.string(), z.any()).optional().describe("Additional metadata like logs or token usage")
     },
     async (params) => {
       try {
         const res = await apiClient.submitResult(
-          params.executionId, 
-          params.result, 
-          params.outputFiles, 
-          params.metadata
+          params.executionId,
+          params.result,
+          params.outputFiles,
+          params.metadata,
+          params.fileIds
         );
         return {
           content: [{ type: "text", text: JSON.stringify(res, null, 2) }]

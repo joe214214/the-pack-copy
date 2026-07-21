@@ -120,6 +120,7 @@ export function detectContentType(filename: string): string {
     ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
     ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
     ".csv": "text/csv", ".json": "application/json",
+    ".html": "text/html", ".htm": "text/html", ".css": "text/css", ".js": "text/javascript",
   };
   return mimeMap[ext] || "application/octet-stream";
 }

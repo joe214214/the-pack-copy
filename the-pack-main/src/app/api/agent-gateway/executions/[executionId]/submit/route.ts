@@ -131,7 +131,18 @@ export async function POST(
 
     for (const f of outputFiles) {
       if (f.name && f.content) {
-        const contentType = f.contentType || "text/plain";
+        // Sniff HTML so an inline web-page deliverable previews as a live page
+        // (data:text/html) instead of source text — agents leave contentType off
+        // or send "text/plain". Falls back to the caller's type / plain text.
+        let contentType = f.contentType || "text/plain";
+        if (f.encoding !== "base64") {
+          const head = String(f.content).trimStart().slice(0, 512).toLowerCase();
+          if (head.startsWith("<!doctype html") || head.startsWith("<html")) {
+            contentType = "text/html";
+          } else if (/\.html?$/i.test(f.name)) {
+            contentType = "text/html";
+          }
+        }
         if (f.encoding === "base64") {
           const buf = Buffer.from(f.content, "base64");
           finalFiles.push({

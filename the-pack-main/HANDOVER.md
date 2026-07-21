@@ -1644,3 +1644,86 @@ scaling — whole-file-in-memory, single-disk — is still the separate object-s
 pre-launch TODO; unaffected by this change.)
 
 ### State: services still UP (platform :3100 + sandbox). LOCAL only — not pushed.
+
+---
+
+## 2026-07-20 (later 2) — Skill A/B test (core value prop) + FIRST validation that skills work in the sandbox
+
+### What & why
+Demo the "rent an agent = also rent its skills" value prop: same banner brief run
+twice — no skill vs with a brand-design skill. Also the first real test that a
+skill placed in the owner's ~/.claude/skills actually reaches and is used by the
+containerized agent (previously the skills dir was empty, so untested).
+
+### Setup
+- Authored `~/.claude/skills/thepack-banner-design/SKILL.md` — a ThePack brand
+  system (exact palette hex, asymmetric left-weighted layout grid, type hierarchy,
+  cyan accent bar, concentric-ring motif, "ThePack" wordmark). Brief given to the
+  agent contained ONLY copy + theme, none of the design rules.
+- Added `fonts-dejavu-core` to the sandbox Dockerfile (fair text baseline).
+- Control: same container. Run 1 with claude-home/skills EMPTY; Run 2 after copying
+  the skill into claude-home/skills (claude re-scans skills per run — no rebuild).
+
+### Result — skill IS discovered & applied in the container ✅ (first proof)
+- Run 2's own summary: "following the ThePack brand design system (diagonal
+  indigo→violet gradient, asymmetric left-aligned text with cyan accent bar,
+  subtle ring motif, ThePack wordmark)" — i.e. it invoked the skill.
+- Pixel proof of brand compliance (gradient corners):
+  - Run 2 (skill): top-left #201B4E ≈ brand indigo #1E1B4B ✓, bottom-right
+    #7939E9 ≈ brand violet #7C3AED ✓ — exact palette.
+  - Run 1 (no skill): #080C20 → #361E5A — its OWN colors; violet endpoint does
+    NOT match brand.
+- Run 2 has the "ThePack" wordmark + concentric-ring motif per spec; Run 1 has
+  neither (it invented a "PRODUCT LAUNCH" eyebrow + a CTA button, its own node-graph
+  motif). Both 1600×600, auto-review passed.
+
+### Honest finding for positioning
+The no-skill baseline is ALREADY a professional-looking banner — the base model is
+very strong. So the skill's demonstrated value is NOT "prettier" but **brand-spec
+compliance + consistency/repeatability**: with the skill every banner hits the
+exact ThePack palette/layout/wordmark; without it each run is a different, generic
+interpretation. That's the more accurate (and B2B-compelling) way to pitch skills.
+
+### Artifacts: banner_noskill.png / banner_skill.png (scratchpad). Services still UP.
+### LOCAL only — the skill lives in ~/.claude/skills (not the repo). Dockerfile font change committed-pending.
+
+## 2026-07-20 (later 3) — UI / HTML deliverable pipeline: deliver + LIVE PREVIEW
+
+### What & why
+Validate a full UI-delivery chain: publish a task → containerized agent builds a
+self-contained web page → publisher opens the order and PREVIEWS the live page.
+Ran 4 iterative UI tasks (counter / color-picker / greeting / stopwatch) and fixed
+every content-type / preview gap found along the way.
+
+### Fixes (three root causes, one per early iteration)
+1. `src/lib/storage.ts` — `detectContentType` now knows `.html/.htm/.css/.js`
+   (was returning octet-stream → served/downloaded, never previewed).
+2. `api/agent-gateway/files/upload/route.ts` — normalize the served content-type:
+   content-sniff the first 512 bytes (`<!doctype html>` / `<html`) → force
+   `text/html`, else trust a known file extension over a generic caller type.
+   Fixes agents that tag a page `text/plain` or name it `index.html.txt`.
+3. `api/agent-gateway/executions/[executionId]/submit/route.ts` — same HTML
+   sniffing on the INLINE `outputFiles` path (data: URIs), so an inlined page
+   becomes `data:text/html` (live) instead of `data:text/plain` (source text).
+4. `dashboard/orders/[id]/page.tsx` — delivered web pages now render in a
+   **sandboxed `<iframe sandbox="allow-scripts">`** (JS runs, no same-origin →
+   can't touch this site's cookies/DOM) + Open-in-new-tab / Download affordances.
+5. Clean file-deliverable path end to end: `submit_result` MCP tool + api-client +
+   submit route accept `fileIds` (upload_file → pass id to submit_result); runner
+   web-branch prompt tells the agent to deliver ONE self-contained `index.html` as
+   an UPLOADED FILE (contentType text/html) and NOT inline it or rename to .txt.
+
+### Result — verified ✅
+v4 "stopwatch" delivered with `type=text/html` (`data:text/html;…base64,PCFE…` =
+`<!DOCTYPE html>…`), order page compiles 200, live sandboxed iframe preview works.
+NOTE: v1–v3 were delivered DURING the iterative fixing, so they're frozen with the
+pre-fix (broken) type/name (`text/plain`, `index.html.txt`) and preview blank —
+EXPECTED; stored delivery records don't retro-update. Only NEW deliveries get the
+fix (v4 proves it).
+
+### Also (Desktop-skill bridging, from earlier this session)
+`thepack-mcpb/sandbox/collect-skills.ps1` (NEW) merges `~/.claude/skills` + Claude
+Desktop account skills (`%LOCALAPPDATA%\Packages\Claude_*\…\skills-plugin`) into
+claude-home/skills (dedup by name, latest-wins); start.bat/start.sh call it.
+
+### LOCAL only — nothing committed before this commit. Services stopped.

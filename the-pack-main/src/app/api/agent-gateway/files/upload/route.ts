@@ -148,6 +148,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Execution already ${execution.status}` }, { status: 400 });
     }
 
+    // Normalize the served type so deliverables PREVIEW correctly. Agents are
+    // unreliable here — they tag a web page "text/plain" or name it
+    // "index.html.txt", which would render as source text, not a live page. So:
+    //   1) content-sniff HTML (bytes starting an HTML doc) → text/html, then
+    //   2) otherwise trust a known file extension over a generic caller type.
+    const head = buffer.subarray(0, 512).toString("utf8").trimStart().toLowerCase();
+    if (head.startsWith("<!doctype html") || head.startsWith("<html")) {
+      contentType = "text/html";
+    } else {
+      const detected = detectContentType(filename);
+      if (detected !== "application/octet-stream") contentType = detected;
+    }
+
     const result = await uploadFile("task-outputs", executionId, filename, buffer, contentType);
 
     // Extract image dimensions

@@ -12,8 +12,12 @@ import { getTaskType } from "@/lib/task-types";
 import {
   ArrowLeft, Bot, CheckCircle2, Clock, DollarSign, FileText,
   Loader2, ShoppingCart, Star, AlertTriangle, Zap,
-  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, ImageIcon, Download,
+  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, ImageIcon, Download, ExternalLink,
 } from "lucide-react";
+
+// File types the browser can render in a tab, so we offer an "Open / preview"
+// link (not just download) — e.g. an agent-delivered self-contained web page.
+const PREVIEWABLE = /\.(html?|svg|pdf|txt|md|json|csv)$/i;
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
@@ -487,18 +491,50 @@ export default function OrderDetailPage() {
                         </div>
                       )}
                       {/* Other files list */}
-                      {otherFiles.map((file: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
-                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="text-sm font-medium flex-1 truncate">{file.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {(file.size / 1024).toFixed(1)} KB
-                          </span>
-                          <a href={file.url} download={file.name}>
-                            <Download className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                          </a>
-                        </div>
-                      ))}
+                      {otherFiles.map((file: any, i: number) => {
+                        const isHtml =
+                          file.type === "text/html" || /\.html?$/i.test(file.name || "");
+                        const previewable =
+                          isHtml ||
+                          file.type?.startsWith("text/") ||
+                          file.type === "application/pdf" ||
+                          PREVIEWABLE.test(file.name || "");
+                        return (
+                          <div key={i} className="space-y-2">
+                            <div className="flex items-center gap-3 rounded-lg border p-3">
+                              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                              <span className="text-sm font-medium flex-1 truncate">{file.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {(file.size / 1024).toFixed(1)} KB
+                              </span>
+                              {previewable && (
+                                <a
+                                  href={file.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Open in a new tab"
+                                >
+                                  <ExternalLink className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                                </a>
+                              )}
+                              <a href={file.url} download={file.name} title="Download">
+                                <Download className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                              </a>
+                            </div>
+                            {/* Live preview of a delivered web page. Sandboxed
+                                (allow-scripts, no allow-same-origin) → the page's
+                                JS runs but can't touch this site's cookies/DOM. */}
+                            {isHtml && (
+                              <iframe
+                                src={file.url}
+                                title={`Preview of ${file.name}`}
+                                sandbox="allow-scripts"
+                                className="w-full h-96 rounded-lg border bg-white"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
                     </>
                   );
                 })()}

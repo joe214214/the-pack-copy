@@ -23,11 +23,10 @@ if exist "%HOST_CLAUDE%\.credentials.json" (
   echo No Claude login found at %HOST_CLAUDE%\.credentials.json - the box will
   echo fall back to ANTHROPIC_API_KEY from .env if you set one.
 )
-if exist "%HOST_CLAUDE%\skills" (
-  if exist claude-home\skills rmdir /S /Q claude-home\skills
-  xcopy /E /I /Y "%HOST_CLAUDE%\skills" claude-home\skills >nul
-  echo Copied your skills into the sandbox.
-)
+REM Collect skills from BOTH ~/.claude/skills AND the Claude Desktop app (most
+REM people add skills straight from Desktop, which stores them outside ~/.claude).
+echo Collecting your skills ^(CLI + Desktop^) into the sandbox...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0collect-skills.ps1"
 
 REM Pass "hardened" to add the egress-allowlist network wall.
 if "%1"=="hardened" (

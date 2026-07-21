@@ -22,10 +22,25 @@ else
   echo "No Claude login found at $HOST_CLAUDE/.credentials.json — the box will"
   echo "fall back to ANTHROPIC_API_KEY from .env if you set one."
 fi
-if [ -d "$HOST_CLAUDE/skills" ]; then
+# Collect skills from BOTH ~/.claude/skills AND the Claude Desktop app (most
+# people add skills straight from Desktop, which stores them outside ~/.claude).
+if command -v powershell.exe >/dev/null 2>&1; then
+  # Windows (Git Bash): reuse the PowerShell collector (Desktop path + dedupe).
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "collect-skills.ps1"
+else
   rm -rf ./claude-home/skills
-  cp -r "$HOST_CLAUDE/skills" ./claude-home/skills
-  echo "Copied your skills into the sandbox."
+  mkdir -p ./claude-home/skills
+  _copy_skill_dirs() {
+    find "$1" -type f -name SKILL.md 2>/dev/null | while read -r sk; do
+      d="$(dirname "$sk")"; name="$(basename "$d")"
+      rm -rf "./claude-home/skills/$name"
+      cp -r "$d" "./claude-home/skills/$name"
+    done
+  }
+  [ -d "$HOST_CLAUDE/skills" ] && _copy_skill_dirs "$HOST_CLAUDE/skills"
+  # macOS Claude Desktop account skills
+  _copy_skill_dirs "$HOME/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin"
+  echo "Collected skills (CLI + Desktop) into the sandbox."
 fi
 
 # Pass "hardened" to add the egress-allowlist network wall.

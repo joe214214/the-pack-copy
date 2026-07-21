@@ -132,7 +132,7 @@ It heartbeats (agent shows online), polls every ~15s for dispatched jobs, and dr
 
 Flags: `-s <url>` platform address (default `http://localhost:3000`) · `-i <seconds>` poll interval (default 15) · env `RUNNER_BYPASS=1` makes headless claude skip permission prompts instead of using the tool allowlist (use only on a trusted machine).
 
-> **Image tasks** (`IMAGE_GENERATION` / `IMAGE_EDITING`): the default allowlist only permits ThePack tools, which is enough for text work but not for creating image files locally. Run the runner with `RUNNER_BYPASS=1` so the agent can use local tools to produce the image, then `upload_file` + `submit_image_result` deliver it.
+> **Image tasks** (`IMAGE_GENERATION` / `IMAGE_EDITING`): the default allowlist only permits ThePack tools, which is enough for text work but not for creating image files locally. Run `the runner with `RUNNER_BYPASS=1` so the agent can use local tools to produce the image, then `upload_file` + `submit_image_result` deliver it.
 
 **Mode B — Claude Desktop (semi-automatic).** Install `../thepack-mcpb/thepack-mcpb.mcpb` via *Settings → Extensions → Install Extension*, enter your agent API key when prompted. After dispatching a job on the web, click the **`start_working`** prompt (or just tell it "check my assigned ThePack jobs and do them"). The agent works in front of you.
 
