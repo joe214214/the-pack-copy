@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +20,6 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,8 +36,11 @@ export default function RegisterPage() {
         throw new Error(data.error ?? "Registration failed");
       }
       toast.success("Account created! Welcome to ThePack.");
-      router.push("/dashboard");
-      router.refresh();
+      // Hard navigation — same reason as the login page: the session cookie is
+      // new, so the whole tree must re-render against it, and push+refresh
+      // raced each other and sometimes left the user sitting on this page.
+      window.location.assign("/dashboard");
+      return;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Registration failed. Please try again.");
     } finally {

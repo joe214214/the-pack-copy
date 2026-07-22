@@ -1822,3 +1822,51 @@ text+files — whatever the brief/outputFormat says).
 - DB: added CUSTOM to Claude 1 agent supported+accept task types (for testing).
 
 ### tsc --noEmit clean. Committed to feature/ui-html-delivery-preview.
+
+## 2026-07-21 — Cross-machine demo hardening: LAN dev origins + login redirect
+
+### The big one: LAN access was completely broken (blocker for the two-laptop demo)
+Opening the app from ANOTHER machine on the LAN loaded the HTML but React never
+hydrated — buttons did nothing and the login form fell back to a native submit
+(page "flashed", inputs cleared, stayed on /login). Correct password or not made
+no difference, which is the tell: the JS handler was never attached.
+
+Root cause: **Next 16 blocks cross-origin requests to dev-only assets** (`/_next/*`,
+the HMR socket) from any origin other than the one the server booted on (localhost).
+Console showed the HMR websocket failing against the LAN IP. Only reproducible over
+the LAN IP — localhost was always fine, which is why it looked like a phantom.
+
+Fix: `next.config.ts` sets `allowedDevOrigins` by **enumerating this machine's
+non-internal IPv4 addresses at startup** rather than hardcoding one, because the LAN
+IP changes with the network (venue WiFi vs phone hotspot). A relaunch picks up the
+new IP. Verified over the LAN IP with a headless browser: demo-account button now
+fills the form, login redirects to /dashboard, and the full publish wizard completes.
+
+### Also fixed: login/register redirect race
+`router.push(...)` followed immediately by `router.refresh()` — the refresh could
+cancel the pending navigation, so a correct password sometimes just sat there.
+Both pages now use `window.location.assign()`: logging in changes the session
+cookie, so a full document load (re-rendering every server component against it) is
+the right behavior anyway. Unused `useRouter` imports removed. `tsc --noEmit` clean.
+
+### Runner watchdog raised 8 -> 15 min (sandbox/.env, gitignored)
+A task with TWO complex interactions (inertial horizontal scroller + bottom sheet)
+blew the 8-min watchdog twice and the runner retried forever, burning quota each
+time. Lesson for demos: ONE interaction per task, and add "Do not try to run a
+browser, install packages, or set up any tooling" (the agent kept adding a browser
+test step it cannot perform in the container).
+
+### Verified end-to-end, twice, including a real two-machine rehearsal
+Publish from another laptop (alex) -> "Take task" clicked in a real browser (marco)
+-> sandbox agent picks up in ~7s -> delivers index.html (text/html) -> live preview.
+Work time 3m55s and 4m5s for the slimmed "Kyoto trip details panel" task — well
+inside the 15-min watchdog. apple-design fingerprints in the delivered file:
+velocity 23, spring 20, backdrop-filter 4, rubberband 3, momentum projection 5 —
+none of those words appear anywhere in the brief.
+
+### Demo timing note
+~4 min of agent work is 40% of a 10-min slot. Don't stand in silence: the task page
+shows the agent's own plan ticking off live — narrate the Claude Code workflow over it.
+
+### Cleanup: deleted the failed oversized task + a leftover smoke-test task, and
+### refunded its $100 frozen escrow (deleting an order otherwise locks it forever).

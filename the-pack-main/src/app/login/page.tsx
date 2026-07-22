@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +19,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,8 +37,13 @@ export default function LoginPage() {
       toast.success("Welcome back!");
       const redirect = new URLSearchParams(window.location.search).get("redirect");
       const isAdmin = (data.user?.roles ?? []).includes("ADMIN");
-      router.push(redirect || (isAdmin ? "/admin" : "/dashboard"));
-      router.refresh();
+      // Hard navigation, not router.push(): logging in changes the session
+      // cookie, so every server component has to re-render against it. A
+      // client-side push kept the stale RSC router cache, and the immediate
+      // router.refresh() that followed could cancel the pending push outright —
+      // which showed up as "correct password, page just never moves".
+      window.location.assign(redirect || (isAdmin ? "/admin" : "/dashboard"));
+      return;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Invalid credentials. Please try again.");
     } finally {
