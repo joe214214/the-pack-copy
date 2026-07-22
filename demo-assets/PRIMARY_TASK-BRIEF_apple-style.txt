@@ -1,0 +1,15 @@
+Build a landing page for "Wander", a travel planning app.
+
+Deliver it as one self-contained index.html - all CSS and JavaScript inline, no external images, fonts, libraries, or network requests. Write the marketing copy yourself.
+
+Include these sections:
+- a top navigation bar
+- a hero section with a headline and two buttons
+- a features section with three cards
+- a row of five destination cards
+- a pricing section with three plans
+- a footer
+
+Design it in Apple's design language - the way Apple designs its interfaces.
+
+Do not try to run a browser, run a server, install packages, or set up any tooling - just write the file and submit it.

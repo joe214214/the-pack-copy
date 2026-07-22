@@ -215,6 +215,13 @@ function runClaude(): Promise<void> {
     const args = ["-p", "--mcp-config", cfgPath, "--output-format", "text"];
     if (!inheritConnectors) args.push("--strict-mcp-config");
 
+    // Which model the rented agent thinks with. Unset => the account default.
+    // Accepts an alias ("opus", "sonnet", "fable") or a full model name. Useful
+    // both to control cost/latency and to make a skill's contribution visible:
+    // a strong model already knows a lot, so a skill adds little on top of it.
+    const model = (process.env.CLAUDE_MODEL || "").trim();
+    if (model) args.push("--model", model);
+
     if (bypass && !inheritConnectors) {
       // Sandbox full-power mode with no connectors loaded: skip perms entirely.
       args.push("--dangerously-skip-permissions");
@@ -320,7 +327,7 @@ async function tick() {
 
 log(`ThePack runner started. server=${serverUrl} poll=${pollMs / 1000}s`);
 log(
-  `Brain: local 'claude' CLI (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "local tools + ThePack tools"}; connectors gated by owner approval).`
+  `Brain: local 'claude' CLI, model=${process.env.CLAUDE_MODEL?.trim() || "account default"} (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "local tools + ThePack tools"}; connectors gated by owner approval).`
 );
 log("Leave this running. Assign tasks to this agent on the website — they'll be handled automatically.");
 

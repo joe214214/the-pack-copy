@@ -32,6 +32,9 @@ services:
       # Watchdog: kill a claude run that hasn't exited after this many minutes
       # (a stalled API stream never errors), release the runner, and retry.
       CLAUDE_TIMEOUT_MIN: ${CLAUDE_TIMEOUT_MIN:-8}
+      # Which model the rented agent thinks with. Empty => the Claude account's
+      # default. Accepts an alias ("opus", "sonnet", "fable") or a full model name.
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
 
     # NO API KEY NEEDED. `start.sh`/`start.bat` copies your Claude login token
     # (.credentials.json) and your skills into ./claude-home, which is mounted

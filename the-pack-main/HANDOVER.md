@@ -1918,3 +1918,41 @@ Both Wander runs + renders, the Cadence pair, the Kyoto sheet pair, the exact ta
 brief, and a README documenting all of the above including the correction.
 
 ### Services stopped. tsc --noEmit clean.
+
+## 2026-07-22 (later) — Selectable agent model + the A/B that actually works
+
+### CLAUDE_MODEL: the rented agent's model is now configurable
+`runner.ts` passes `--model` to the `claude` CLI when `CLAUDE_MODEL` is set
+(alias `opus` | `sonnet` | `fable`, or a full model name; empty = account default).
+Plumbed through `sandbox/docker-compose.yml` and `sandbox/.env`, and the startup
+banner now prints it: `Brain: local 'claude' CLI, model=sonnet (...)`.
+
+### Why it matters: on a top model, a skill has nothing left to add
+The earlier landing-page A/B on opus came out equivalent with vs without
+`apple-design` because opus already designs well unaided. Re-ran on **sonnet** with
+a deliberately thin brief (list the sections, ask for "Apple's design language",
+no other guidance) and the skill's contribution became clearly visible:
+
+| | no skill | with skill |
+|---|---|---|
+| canvas | dark theme (the stock "dark = premium" read of *Apple*) | light canvas + grey section bands, as apple.com actually does |
+| CTA | two filled buttons | blue pill + text link with chevron — Apple's real pattern |
+| destinations row | 5th card clipped off-screen (layout bug) | all five fit |
+| letter-spacing | 6 | 11 |
+| cubic-bezier | 0 | 3 |
+| prefers-reduced-motion | 0 | **1** |
+
+`prefers-reduced-motion` is the strongest evidence: accessible motion degradation is
+an explicit section of the skill and only the skill run implemented it — knowledge
+arriving from the skill, not taste. Work time 3m18s vs 3m43s, roughly half of opus
+(4m38s / 7m05s), which also suits a 10-minute stage slot better.
+
+Note the brief here DOES ask for Apple style, unlike the earlier experiments. That
+makes it a fairer product question — "when the customer asks for Apple style, does
+the skill deliver it more authentically?" — since both runs attempt it.
+
+### demo-assets/: the sonnet pair is now the PRIMARY material (PRIMARY_* files),
+### with the README documenting the comparison, the reasoning for using sonnet, and
+### which pairs must NOT be presented as skill A/Bs.
+
+### Services stopped.
