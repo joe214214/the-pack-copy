@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cadence — Protect your deep work</title>
+<style>
+  :root{
+    --bg: #fbfaf8;
+    --bg-alt: #f3f1ec;
+    --ink: #1b1c22;
+    --ink-soft: #55575f;
+    --ink-faint: #8a8c94;
+    --line: rgba(27,28,34,0.09);
+    --brand: #4b3df5;
+    --brand-ink: #3327c9;
+    --brand-soft: #eeecfe;
+    --accent: #ff7a59;
+    --accent-soft: #fff0ea;
+    --green: #1f9d6b;
+    --radius: 18px;
+    --shadow-sm: 0 1px 2px rgba(20,20,30,0.06), 0 1px 1px rgba(20,20,30,0.04);
+    --shadow-md: 0 8px 24px rgba(20,20,40,0.08), 0 2px 6px rgba(20,20,40,0.05);
+    --shadow-lg: 0 24px 64px rgba(20,20,40,0.14), 0 6px 16px rgba(20,20,40,0.06);
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  *{ box-sizing: border-box; }
+  html{ font: 100%/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif; }
+  body{
+    margin:0;
+    min-width: 1200px;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a{ color: inherit; text-decoration: none; }
+  ul{ margin:0; padding:0; list-style:none; }
+  button{ font-family: inherit; cursor: pointer; border: none; }
+
+  .container{
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 40px;
+  }
+
+  h1,h2,h3{ margin:0; font-weight: 650; letter-spacing: -0.02em; }
+  p{ margin:0; }
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    transition: transform 160ms var(--ease), box-shadow 160ms var(--ease), background 160ms var(--ease), color 160ms var(--ease);
+    white-space: nowrap;
+  }
+  .btn:active{ transform: scale(0.96); transition-duration: 90ms; }
+
+  .btn-primary{
+    background: var(--brand);
+    color: #fff;
+    box-shadow: 0 1px 2px rgba(75,61,245,0.3), 0 8px 20px rgba(75,61,245,0.22);
+  }
+  .btn-primary:hover{
+    background: var(--brand-ink);
+    box-shadow: 0 2px 4px rgba(75,61,245,0.35), 0 12px 28px rgba(75,61,245,0.3);
+    transform: translateY(-1px);
+  }
+
+  .btn-secondary{
+    background: transparent;
+    color: var(--ink);
+    border: 1.5px solid var(--line);
+  }
+  .btn-secondary:hover{
+    background: var(--bg-alt);
+    border-color: rgba(27,28,34,0.18);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost{
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+    padding: 10px 18px;
+  }
+  .btn-ghost:hover{ background: #e2ddfc; transform: translateY(-1px); }
+
+  .btn-light{
+    background: #fff;
+    color: var(--ink);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-light:hover{ box-shadow: var(--shadow-md); transform: translateY(-1px); }
+
+  /* ---------- Nav ---------- */
+  .nav{
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(251,250,248,0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-row{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 72px;
+  }
+  .wordmark{
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .wordmark .dot{
+    width: 11px; height: 11px;
+    border-radius: 4px;
+    background: linear-gradient(145deg, var(--brand), #8b7bff);
+    box-shadow: 0 2px 6px rgba(75,61,245,0.4);
+  }
+  .nav-links{
+    display: flex;
+    gap: 36px;
+    align-items: center;
+  }
+  .nav-links a{
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    position: relative;
+    padding: 6px 0;
+    transition: color 150ms var(--ease);
+  }
+  .nav-links a:hover{ color: var(--ink); }
+  .nav-links a::after{
+    content:"";
+    position: absolute;
+    left:0; right:0; bottom: -2px;
+    height: 2px;
+    background: var(--brand);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 200ms var(--ease);
+  }
+  .nav-links a:hover::after{ transform: scaleX(1); }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    padding: 96px 0 88px;
+    overflow: hidden;
+  }
+  .hero-grid{
+    display: grid;
+    grid-template-columns: 1fr 0.92fr;
+    gap: 64px;
+    align-items: center;
+  }
+  .eyebrow{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+    font-size: 13px;
+    font-weight: 650;
+    padding: 7px 14px 7px 10px;
+    border-radius: 999px;
+    margin-bottom: 22px;
+    letter-spacing: -0.005em;
+  }
+  .eyebrow span.pulse{
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px rgba(31,157,107,0.18);
+  }
+  .hero h1{
+    font-size: 58px;
+    line-height: 1.04;
+    letter-spacing: -0.028em;
+    color: var(--ink);
+  }
+  .hero h1 em{
+    font-style: normal;
+    background: linear-gradient(100deg, var(--brand) 10%, #8b6bff 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero-sub{
+    margin-top: 22px;
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 480px;
+  }
+  .hero-actions{
+    margin-top: 34px;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
+  .hero-actions .btn{ padding: 14px 26px; font-size: 15.5px; }
+  .reassure{
+    margin-top: 18px;
+    font-size: 13.5px;
+    color: var(--ink-faint);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .reassure svg{ width: 14px; height: 14px; flex-shrink: 0; }
+
+  /* ---------- Hero calendar graphic ---------- */
+  .cal-card{
+    background: #fff;
+    border-radius: 24px;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--line);
+    padding: 22px 22px 26px;
+    transform: rotate(0.4deg);
+  }
+  .cal-head{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .cal-head .title{ font-size: 14.5px; font-weight: 650; color: var(--ink); }
+  .cal-head .dots{ display:flex; gap:6px; }
+  .cal-head .dots i{ width:9px; height:9px; border-radius:50%; background: var(--line); display:block; }
+  .cal-week{
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  .cal-week .day-label{
+    grid-row: 1;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--ink-faint);
+    text-align: center;
+    padding-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .cal-col{
+    background: var(--bg-alt);
+    border-radius: 12px;
+    min-height: 250px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+  }
+  .cal-col .hourline{
+    position:absolute;
+    left:6px; right:6px;
+    height:1px;
+    background: rgba(27,28,34,0.06);
+  }
+  .block{
+    border-radius: 8px;
+    padding: 8px 9px;
+    font-size: 11px;
+    font-weight: 650;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    line-height: 1.3;
+  }
+  .block small{ display:block; font-weight: 500; opacity: 0.85; font-size: 10px; margin-top: 2px;}
+  .block.focus{ background: linear-gradient(150deg, var(--brand), #7a67ff); margin-top: 30px; height: 96px; }
+  .block.meeting{ background: linear-gradient(150deg, #ff9166, var(--accent)); height: 46px; margin-top: 14px; }
+  .block.focus2{ background: linear-gradient(150deg, #2fb583, var(--green)); margin-top: 58px; height: 70px; }
+  .block.light{ background: #fff; color: var(--ink-soft); border: 1px dashed rgba(27,28,34,0.15); box-shadow:none; margin-top: 10px; height: 34px; }
+
+  .cal-foot{
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    background: var(--brand-soft);
+    padding: 10px 14px;
+    border-radius: 12px;
+  }
+  .cal-foot b{ color: var(--brand-ink); }
+
+  /* ---------- Section shell ---------- */
+  section{ padding: 100px 0; }
+  .section-head{
+    text-align: center;
+    max-width: 620px;
+    margin: 0 auto 56px;
+  }
+  .kicker{
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--brand);
+    margin-bottom: 12px;
+    display: block;
+  }
+  .section-head h2{
+    font-size: 38px;
+    letter-spacing: -0.022em;
+    line-height: 1.15;
+  }
+  .section-head p{
+    margin-top: 14px;
+    font-size: 17px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+
+  /* ---------- Features ---------- */
+  .features{ background: var(--bg-alt); }
+  .feature-grid{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .feature-card{
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 32px 28px;
+    border: 1px solid var(--line);
+    transition: transform 220ms var(--ease), box-shadow 220ms var(--ease), border-color 220ms var(--ease);
+  }
+  .feature-card:hover{
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-md);
+    border-color: rgba(75,61,245,0.18);
+  }
+  .icon-badge{
+    width: 52px; height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 20px;
+  }
+  .icon-badge.i1{ background: var(--brand-soft); }
+  .icon-badge.i2{ background: var(--accent-soft); }
+  .icon-badge.i3{ background: #e6f7ef; }
+  .feature-card h3{ font-size: 19px; letter-spacing: -0.01em; margin-bottom: 10px; }
+  .feature-card p{ font-size: 15px; color: var(--ink-soft); line-height: 1.6; }
+
+  /* ---------- Stats ---------- */
+  .stats{
+    background: linear-gradient(135deg, #211c4d, #372d84 55%, #4b3df5);
+    color: #fff;
+    padding: 76px 0;
+  }
+  .stats-grid{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    text-align: center;
+  }
+  .stat-num{
+    font-size: 52px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    background: linear-gradient(120deg, #ffffff, #cfc9ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .stat-cap{
+    margin-top: 8px;
+    font-size: 14.5px;
+    color: rgba(255,255,255,0.72);
+    font-weight: 500;
+  }
+  .stats-grid .stat + .stat{ border-left: 1px solid rgba(255,255,255,0.14); }
+
+  /* ---------- Pricing ---------- */
+  .pricing-grid{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+  .plan{
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 34px 30px;
+    transition: transform 220ms var(--ease), box-shadow 220ms var(--ease);
+  }
+  .plan:hover{ transform: translateY(-5px); box-shadow: var(--shadow-md); }
+  .plan.featured{
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
+    position: relative;
+    transform: scale(1.035);
+    box-shadow: var(--shadow-lg);
+  }
+  .plan.featured:hover{ transform: scale(1.035) translateY(-5px); }
+  .plan-badge{
+    position: absolute;
+    top: -13px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 6px 14px;
+    border-radius: 999px;
+    box-shadow: 0 4px 12px rgba(255,122,89,0.4);
+  }
+  .plan-name{ font-size: 15px; font-weight: 650; color: var(--ink-soft); }
+  .plan.featured .plan-name{ color: rgba(255,255,255,0.65); }
+  .plan-price{
+    margin-top: 12px;
+    font-size: 42px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .plan-price span{ font-size: 15px; font-weight: 500; color: var(--ink-faint); }
+  .plan.featured .plan-price span{ color: rgba(255,255,255,0.55); }
+  .plan-desc{ margin-top: 10px; font-size: 14px; color: var(--ink-soft); }
+  .plan.featured .plan-desc{ color: rgba(255,255,255,0.7); }
+  .plan-list{ margin: 26px 0 28px; display: flex; flex-direction: column; gap: 12px; }
+  .plan-list li{
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .plan.featured .plan-list li{ color: rgba(255,255,255,0.92); }
+  .plan-list svg{ flex-shrink: 0; margin-top: 3px; width: 15px; height: 15px; color: var(--green); }
+  .plan.featured .plan-list svg{ color: #8bffce; }
+  .plan .btn{ width: 100%; }
+
+  /* ---------- CTA band ---------- */
+  .cta{
+    background: var(--brand-soft);
+    border-radius: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 72px 60px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .cta::before{
+    content:"";
+    position: absolute;
+    width: 420px; height: 420px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(75,61,245,0.14), transparent 70%);
+    top: -160px; right: -120px;
+  }
+  .cta h2{
+    font-size: 36px;
+    letter-spacing: -0.02em;
+    position: relative;
+  }
+  .cta p{
+    margin-top: 14px;
+    font-size: 16.5px;
+    color: var(--ink-soft);
+    position: relative;
+  }
+  .cta .btn{ margin-top: 28px; position: relative; padding: 15px 32px; font-size: 16px; }
+
+  /* ---------- Footer ---------- */
+  footer{
+    border-top: 1px solid var(--line);
+    padding: 64px 0 36px;
+  }
+  .footer-top{
+    display: flex;
+    justify-content: space-between;
+    gap: 40px;
+    padding-bottom: 48px;
+  }
+  .footer-brand p{
+    margin-top: 14px;
+    font-size: 14px;
+    color: var(--ink-faint);
+    max-width: 260px;
+    line-height: 1.6;
+  }
+  .footer-cols{
+    display: flex;
+    gap: 72px;
+  }
+  .footer-col h4{
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 16px;
+  }
+  .footer-col ul{ display: flex; flex-direction: column; gap: 11px; }
+  .footer-col a{
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    transition: color 150ms var(--ease);
+  }
+  .footer-col a:hover{ color: var(--brand); }
+  .footer-bottom{
+    border-top: 1px solid var(--line);
+    padding-top: 26px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+  .footer-bottom .social{ display: flex; gap: 16px; }
+  .footer-bottom .social a{
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--bg-alt);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-soft);
+    transition: background 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--ease);
+  }
+  .footer-bottom .social a:hover{ background: var(--brand-soft); color: var(--brand-ink); transform: translateY(-2px); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition-duration: 60ms !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ================= NAV ================= -->
+  <header class="nav">
+    <div class="container nav-row">
+      <a href="#" class="wordmark"><span class="dot"></span>Cadence</a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#about">About</a>
+      </nav>
+      <a href="#" class="btn btn-primary">Get started</a>
+    </div>
+  </header>
+
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div>
+        <span class="eyebrow"><span class="pulse"></span>Now with automatic rescheduling</span>
+        <h1>Protect the hours<br>that matter <em>most.</em></h1>
+        <p class="hero-sub">Cadence studies how you actually work, then quietly builds a wall around your deepest focus time — so meetings stop eating the hours you do your best work in.</p>
+        <div class="hero-actions">
+          <a href="#" class="btn btn-primary">Start free</a>
+          <a href="#" class="btn btn-secondary">▶ Watch demo</a>
+        </div>
+        <div class="reassure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+          No credit card required · Free forever plan
+        </div>
+      </div>
+
+      <div class="cal-card">
+        <div class="cal-head">
+          <span class="title">This week</span>
+          <span class="dots"><i></i><i></i><i></i></span>
+        </div>
+        <div class="cal-week">
+          <div class="day-label">MON</div>
+          <div class="day-label">TUE</div>
+          <div class="day-label">WED</div>
+          <div class="day-label">THU</div>
+          <div class="day-label">FRI</div>
+
+          <div class="cal-col">
+            <div class="block focus">Deep Work<small>9:00 – 11:30</small></div>
+            <div class="block meeting">Sync<small>1:00 PM</small></div>
+          </div>
+          <div class="cal-col">
+            <div class="block light">Email<small>9:00</small></div>
+            <div class="block focus2">Design<small>10:30 – 12:00</small></div>
+          </div>
+          <div class="cal-col">
+            <div class="block focus">Deep Work<small>9:00 – 12:00</small></div>
+          </div>
+          <div class="cal-col">
+            <div class="block meeting">Review<small>11:00</small></div>
+            <div class="block focus2">Writing<small>1:00 – 3:00</small></div>
+          </div>
+          <div class="cal-col">
+            <div class="block focus">Deep Work<small>9:00 – 11:00</small></div>
+            <div class="block light">Wrap up<small>4:00</small></div>
+          </div>
+        </div>
+        <div class="cal-foot"><b>14.5 hrs</b>&nbsp;of focus time protected this week</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FEATURES ================= -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-head">
+        <span class="kicker">Features</span>
+        <h2>Built around how focus actually works</h2>
+        <p>Cadence isn't another calendar — it's a quiet negotiator that keeps your best hours yours.</p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon-badge i1">🛡️</div>
+          <h3>Auto-protected blocks</h3>
+          <p>Cadence reserves recurring focus windows and automatically declines conflicting invites before they ever hit your inbox.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon-badge i2">📈</div>
+          <h3>Focus intelligence</h3>
+          <p>Learns your natural energy curve from real usage and shifts deep-work blocks to the hours you're sharpest.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon-badge i3">🤝</div>
+          <h3>Team-aware scheduling</h3>
+          <p>Teammates see your focus time as "busy, but flexible" — so protection never turns into isolation.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= STATS ================= -->
+  <section class="stats">
+    <div class="container stats-grid">
+      <div class="stat">
+        <div class="stat-num">3.2 hrs</div>
+        <div class="stat-cap">Focus time reclaimed per day</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">61%</div>
+        <div class="stat-cap">Fewer mid-day meeting interruptions</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">28,000+</div>
+        <div class="stat-cap">Teams scheduling with Cadence</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PRICING ================= -->
+  <section id="pricing">
+    <div class="container">
+      <div class="section-head">
+        <span class="kicker">Pricing</span>
+        <h2>Simple plans, no surprises</h2>
+        <p>Start free, upgrade when your team needs more coordination.</p>
+      </div>
+      <div class="pricing-grid">
+
+        <div class="plan">
+          <div class="plan-name">Free</div>
+          <div class="plan-price">$0 <span>/ month</span></div>
+          <p class="plan-desc">For individuals building the habit.</p>
+          <ul class="plan-list">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>1 protected focus block / day</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Basic calendar sync</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Weekly focus summary</li>
+          </ul>
+          <a href="#" class="btn btn-secondary">Get started</a>
+        </div>
+
+        <div class="plan featured">
+          <span class="plan-badge">Most popular</span>
+          <div class="plan-name">Pro</div>
+          <div class="plan-price">$12 <span>/ month</span></div>
+          <p class="plan-desc">For people who protect focus daily.</p>
+          <ul class="plan-list">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Unlimited focus blocks</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Focus intelligence engine</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Auto-decline conflicting invites</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Priority support</li>
+          </ul>
+          <a href="#" class="btn btn-light">Start free trial</a>
+        </div>
+
+        <div class="plan">
+          <div class="plan-name">Team</div>
+          <div class="plan-price">$9 <span>/ user / mo</span></div>
+          <p class="plan-desc">For teams coordinating around focus.</p>
+          <ul class="plan-list">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Everything in Pro</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Team-aware scheduling</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Admin controls &amp; reporting</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>SSO &amp; SCIM</li>
+          </ul>
+          <a href="#" class="btn btn-secondary">Talk to sales</a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CTA ================= -->
+  <section id="about">
+    <div class="container">
+      <div class="cta">
+        <h2>Give your best hours somewhere to live.</h2>
+        <p>Set up your first protected block in under two minutes.</p>
+        <a href="#" class="btn btn-primary">Start free today</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FOOTER ================= -->
+  <footer>
+    <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a href="#" class="wordmark"><span class="dot"></span>Cadence</a>
+          <p>The calendar that protects your deep work, automatically.</p>
+        </div>
+        <div class="footer-cols">
+          <div class="footer-col">
+            <h4>Product</h4>
+            <ul>
+              <li><a href="#features">Features</a></li>
+              <li><a href="#pricing">Pricing</a></li>
+              <li><a href="#">Integrations</a></li>
+              <li><a href="#">Changelog</a></li>
+            </ul>
+          </div>
+          <div class="footer-col">
+            <h4>Company</h4>
+            <ul>
+              <li><a href="#about">About</a></li>
+              <li><a href="#">Careers</a></li>
+              <li><a href="#">Blog</a></li>
+              <li><a href="#">Contact</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 Cadence Labs, Inc. All rights reserved.</span>
+        <span class="social">
+          <a href="#" aria-label="Twitter">𝕏</a>
+          <a href="#" aria-label="LinkedIn">in</a>
+          <a href="#" aria-label="GitHub">gh</a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

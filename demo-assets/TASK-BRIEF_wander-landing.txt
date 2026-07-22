@@ -1,0 +1,21 @@
+Build a complete, finished landing page for "Wander", a travel planning app. Write short, believable marketing copy yourself. Use CSS gradients or inline SVG for any imagery - no external images, fonts, or libraries, and no network requests.
+
+The page, top to bottom:
+
+1. A sticky top navigation bar: the "Wander" wordmark on the left, links "Destinations", "Pricing", "About" in the middle, and a "Get started" button on the right.
+
+2. A hero section: a large headline, a one-sentence subheading, two buttons ("Plan a trip" primary, "Watch demo" secondary), and a small reassurance line underneath. To one side, a stylised trip card built with CSS (a gradient "photo" with a destination name and dates over it).
+
+3. A features section with a short heading and three cards side by side, each with an icon (emoji or inline SVG), a title, and two lines of description.
+
+4. A destinations strip: five gradient cards in a row, each with a city name and a country underneath.
+
+5. A pricing section with three plans (Free, Plus, Family) - each with a price, four bullet points, and a button. Mark the middle plan as recommended.
+
+6. A footer with the wordmark, two columns of links, and a copyright line.
+
+Finally, tapping any destination card or the "Plan a trip" button opens a details panel that comes up from the bottom of the screen and covers the lower two thirds, with the area behind it dimmed. The panel has a small grab handle at the top, a heading, a short paragraph, and four rows of trip details. The user can grab the panel by its handle and move it up and down, and dismiss it by dragging it downward. Tapping the dimmed area also closes it.
+
+Everything must feel smooth and polished on a normal desktop width, and work with both a mouse and touch. Interactive elements should give clear feedback when hovered and pressed. Nothing should feel stiff or laggy.
+
+Do not try to run a browser, run a server, install packages, or set up any tooling - just write the file and submit it.

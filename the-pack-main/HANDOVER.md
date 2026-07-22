@@ -1870,3 +1870,51 @@ shows the agent's own plan ticking off live — narrate the Claude Code workflow
 
 ### Cleanup: deleted the failed oversized task + a leftover smoke-test task, and
 ### refunded its $100 frozen escrow (deleting an order otherwise locks it forever).
+
+## 2026-07-22 — "Open in a new tab" for delivered pages + an honest A/B correction
+
+### Open delivered HTML in its own tab (new route)
+An inline deliverable is stored as a `data:` URI, and browsers refuse to open a
+`data:` URL as a top-level navigation — so a delivered web page could only ever be
+previewed in an iframe. Added `GET /api/deliverables/[executionId]/[name]`, which
+re-serves the stored content from a real URL with a real Content-Type (decoding the
+data URI; uploaded files redirect to their storage URL). The order page now shows an
+explicit "Open" button for HTML deliverables, and the iframe preview points at the
+same URL.
+
+Access is limited to the order's publisher, the agent's owner, or an admin.
+Security: the payload is agent-authored HTML, so it is served under
+`Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups`, which
+parks the document in an opaque origin — scripts run, but it cannot act as this site
+against the signed-in user's session. Verified: 200 + text/html + CSP header, and
+401 without a session.
+
+NOTE: it lives under `/api/deliverables/` and not `/api/executions/` because that
+segment already uses an `[orderId]` slug and Next forbids two slug names at the same
+path position (the dev server refuses to boot).
+
+### Honest correction: the full-page A/B does NOT demonstrate the skill
+Ran the identical "Wander" landing-page brief twice — skills dir empty vs only
+`apple-design`. Result: effectively no attributable difference.
+- Fingerprints: velocity 4/4, spring 1/1, rubber-band 0/0, momentum projection 0/0,
+  pointer capture 2/2; the BASELINE used more letter-spacing (13 vs 8).
+- Both independently produced the same structure AND both chose a black "most
+  popular" pricing card — which invalidates the earlier 2026-07-20 note attributing
+  that black card to the skill. Colour (coral vs violet) is run-to-run variation.
+- Times: no-skill 4m38s, with-skill 7m05s.
+
+Why: a marketing landing page never exercises gesture physics, which is what
+`apple-design` is actually about, and the base model is already strong at static
+page design. The skill's effect is only large on interaction-heavy tasks — the
+focused Kyoto bottom-sheet pair still shows velocity 0→23, spring 0→20,
+rubber-band 0→3, momentum projection 0→5.
+
+Takeaway for the demo: present the landing page as "the agent autonomously builds a
+complete product page", NOT as a skill A/B; use the sheet pair (side-by-side source)
+if the skill's value needs demonstrating.
+
+### demo-assets/ added (durable, was previously only in a temp scratch dir)
+Both Wander runs + renders, the Cadence pair, the Kyoto sheet pair, the exact task
+brief, and a README documenting all of the above including the correction.
+
+### Services stopped. tsc --noEmit clean.

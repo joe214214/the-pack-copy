@@ -499,6 +499,14 @@ export default function OrderDetailPage() {
                           file.type?.startsWith("text/") ||
                           file.type === "application/pdf" ||
                           PREVIEWABLE.test(file.name || "");
+                        // Inline deliverables are stored as data: URLs, which a
+                        // browser will not open as a top-level navigation. Route
+                        // them through the server so "open" really opens the page
+                        // in its own tab (served under a sandbox CSP).
+                        const openUrl =
+                          order.execution?.id && file.name
+                            ? `/api/deliverables/${order.execution.id}/${encodeURIComponent(file.name)}`
+                            : file.url;
                         return (
                           <div key={i} className="space-y-2">
                             <div className="flex items-center gap-3 rounded-lg border p-3">
@@ -507,9 +515,21 @@ export default function OrderDetailPage() {
                               <span className="text-xs text-muted-foreground">
                                 {(file.size / 1024).toFixed(1)} KB
                               </span>
-                              {previewable && (
+                              {isHtml && (
                                 <a
-                                  href={file.url}
+                                  href={openUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Open this page in a new tab"
+                                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  Open
+                                </a>
+                              )}
+                              {previewable && !isHtml && (
+                                <a
+                                  href={openUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   title="Open in a new tab"
@@ -526,7 +546,7 @@ export default function OrderDetailPage() {
                                 JS runs but can't touch this site's cookies/DOM. */}
                             {isHtml && (
                               <iframe
-                                src={file.url}
+                                src={openUrl}
                                 title={`Preview of ${file.name}`}
                                 sandbox="allow-scripts"
                                 className="w-full h-96 rounded-lg border bg-white"

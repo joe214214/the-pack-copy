@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Trip Details</title>
+<style>
+  :root {
+    color-scheme: light;
+  }
+
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f4f5f7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f4f5f7;
+  }
+
+  .show-btn {
+    appearance: none;
+    border: none;
+    outline: none;
+    background: #007aff;
+    color: #fff;
+    font-size: 17px;
+    font-weight: 600;
+    padding: 14px 28px;
+    border-radius: 14px;
+    box-shadow: 0 6px 16px rgba(0, 122, 255, 0.28);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+
+  .show-btn:active {
+    transform: scale(0.96);
+    background: #0068da;
+    box-shadow: 0 3px 10px rgba(0, 122, 255, 0.25);
+  }
+
+  /* Backdrop */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.38);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.32s ease;
+    z-index: 10;
+  }
+
+  .backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Bottom sheet */
+  .sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 60vh;
+    max-height: 60vh;
+    background: #ffffff;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+    transform: translateY(100%);
+    transition: transform 0.36s cubic-bezier(0.32, 0.72, 0, 1);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    touch-action: none;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .sheet.open {
+    transform: translateY(0);
+  }
+
+  .sheet.dragging {
+    transition: none;
+  }
+
+  .handle-area {
+    padding: 10px 0 6px;
+    display: flex;
+    justify-content: center;
+    cursor: grab;
+    flex-shrink: 0;
+  }
+
+  .handle-area:active {
+    cursor: grabbing;
+  }
+
+  .handle {
+    width: 36px;
+    height: 5px;
+    border-radius: 3px;
+    background: #d1d1d6;
+  }
+
+  .sheet-content {
+    padding: 4px 24px 28px;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  .sheet-heading {
+    font-size: 21px;
+    font-weight: 700;
+    color: #1c1c1e;
+    margin: 6px 0 18px;
+  }
+
+  .detail-row {
+    display: flex;
+    padding: 13px 0;
+    border-bottom: 1px solid #eef0f2;
+    font-size: 15.5px;
+    color: #1c1c1e;
+  }
+
+  .detail-row:last-child {
+    border-bottom: none;
+  }
+
+  .detail-row .label {
+    color: #8a8a8e;
+    min-width: 100px;
+    font-weight: 500;
+  }
+
+  .detail-row .value {
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+  <div class="screen">
+    <button class="show-btn" id="showBtn">Show details</button>
+  </div>
+
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Trip details">
+    <div class="handle-area" id="handleArea">
+      <div class="handle"></div>
+    </div>
+    <div class="sheet-content">
+      <div class="sheet-heading">Trip to Kyoto</div>
+      <div class="detail-row"><span class="label">Dates</span><span class="value">Apr 3 – Apr 9</span></div>
+      <div class="detail-row"><span class="label">Travelers</span><span class="value">2 adults</span></div>
+      <div class="detail-row"><span class="label">Hotel</span><span class="value">Gion Machiya</span></div>
+      <div class="detail-row"><span class="label">Budget</span><span class="value">$2,400</span></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var showBtn = document.getElementById('showBtn');
+  var backdrop = document.getElementById('backdrop');
+  var sheet = document.getElementById('sheet');
+  var handleArea = document.getElementById('handleArea');
+
+  var sheetHeight = 0;
+  var dragStartY = 0;
+  var currentTranslate = 0;
+  var isDragging = false;
+  var isOpen = false;
+  var activePointerId = null;
+
+  function openSheet() {
+    isOpen = true;
+    sheet.classList.remove('dragging');
+    sheet.style.transform = '';
+    sheet.classList.add('open');
+    backdrop.classList.add('visible');
+  }
+
+  function closeSheet() {
+    isOpen = false;
+    sheet.classList.remove('dragging');
+    sheet.style.transform = '';
+    sheet.classList.remove('open');
+    backdrop.classList.remove('visible');
+  }
+
+  showBtn.addEventListener('click', openSheet);
+  backdrop.addEventListener('click', closeSheet);
+
+  function onPointerDown(e) {
+    if (activePointerId !== null) return;
+    activePointerId = e.pointerId;
+    sheetHeight = sheet.getBoundingClientRect().height;
+    dragStartY = e.clientY;
+    currentTranslate = 0;
+    isDragging = true;
+    sheet.classList.add('dragging');
+    handleArea.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e) {
+    if (!isDragging || e.pointerId !== activePointerId) return;
+    var delta = e.clientY - dragStartY;
+    if (delta < 0) delta = 0; // don't allow dragging above open position
+    currentTranslate = delta;
+    sheet.style.transform = 'translateY(' + delta + 'px)';
+  }
+
+  function onPointerUp(e) {
+    if (!isDragging || e.pointerId !== activePointerId) return;
+    isDragging = false;
+    activePointerId = null;
+    sheet.classList.remove('dragging');
+
+    var threshold = sheetHeight * 0.25;
+    if (currentTranslate > threshold) {
+      closeSheet();
+    } else {
+      openSheet();
+    }
+  }
+
+  handleArea.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+
+  // Also allow dragging from anywhere on the sheet (not just the handle),
+  // but ignore drags that start inside the content area's interactive text selection.
+  sheet.addEventListener('pointerdown', function (e) {
+    if (e.target === handleArea || handleArea.contains(e.target)) return;
+    onPointerDown(e);
+    sheet.setPointerCapture(e.pointerId);
+  });
+})();
+</script>
+
+</body>
+</html>

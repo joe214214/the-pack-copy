@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wander — Plan trips you'll actually take</title>
+<style>
+  :root{
+    --ink:#151321;
+    --ink-soft:#5c5876;
+    --paper:#faf9fc;
+    --card:#ffffff;
+    --line:#eae7f2;
+    --accent:#ff6b57;
+    --accent-ink:#7a1f10;
+    --accent2:#2fb8a8;
+    --shadow-sm:0 1px 2px rgba(21,19,33,.06);
+    --shadow-md:0 8px 24px rgba(21,19,33,.10);
+    --shadow-lg:0 24px 60px rgba(21,19,33,.20);
+    --radius:18px;
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);
+    background:var(--paper);
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;text-decoration:none;}
+  img,svg{display:block;}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 28px;}
+  button{font-family:inherit;cursor:pointer;}
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    border:none;border-radius:999px;
+    padding:13px 24px;
+    font-size:15px;font-weight:600;
+    transition:transform .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease), opacity .18s var(--ease);
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+  .btn:active{transform:scale(.96);}
+  .btn-primary{
+    background:linear-gradient(135deg,#ff6b57,#ff8a3d);
+    color:#fff;
+    box-shadow:0 8px 20px rgba(255,107,87,.35);
+  }
+  .btn-primary:hover{box-shadow:0 12px 28px rgba(255,107,87,.48);transform:translateY(-2px);}
+  .btn-primary:active{transform:translateY(0) scale(.96);}
+  .btn-secondary{
+    background:var(--card);
+    color:var(--ink);
+    border:1.5px solid var(--line);
+  }
+  .btn-secondary:hover{border-color:#d8d4e6;background:#fff;box-shadow:var(--shadow-sm);transform:translateY(-2px);}
+  .btn-ghost{
+    background:transparent;
+    color:var(--ink);
+    border:1.5px solid var(--line);
+    padding:10px 20px;
+  }
+  .btn-ghost:hover{background:#fff;border-color:#d8d4e6;}
+  .btn-block{width:100%;}
+
+  /* ---------- Nav ---------- */
+  header.nav{
+    position:sticky;top:0;z-index:40;
+    background:rgba(250,249,252,.78);
+    backdrop-filter:blur(14px);
+    -webkit-backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-inner{
+    display:flex;align-items:center;justify-content:space-between;
+    height:72px;
+  }
+  .wordmark{
+    font-size:22px;font-weight:800;letter-spacing:-.02em;
+    display:flex;align-items:center;gap:8px;
+  }
+  .wordmark .dot{
+    width:10px;height:10px;border-radius:50%;
+    background:linear-gradient(135deg,#ff6b57,#ffb03d);
+    box-shadow:0 0 0 4px rgba(255,107,87,.15);
+  }
+  .nav-links{
+    display:flex;gap:36px;
+    list-style:none;margin:0;padding:0;
+  }
+  .nav-links a{
+    font-size:15px;font-weight:500;color:var(--ink-soft);
+    position:relative;padding:6px 0;
+    transition:color .15s var(--ease);
+  }
+  .nav-links a::after{
+    content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+    background:var(--ink);transform:scaleX(0);transform-origin:right;
+    transition:transform .25s var(--ease);
+  }
+  .nav-links a:hover{color:var(--ink);}
+  .nav-links a:hover::after{transform:scaleX(1);transform-origin:left;}
+
+  /* ---------- Hero ---------- */
+  .hero{
+    padding:88px 0 100px;
+    display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center;
+  }
+  .hero h1{
+    font-size:clamp(38px,5vw,58px);
+    line-height:1.05;
+    letter-spacing:-.03em;
+    margin:0 0 20px;
+  }
+  .hero h1 em{
+    font-style:normal;
+    background:linear-gradient(100deg,#ff6b57,#ff8a3d 60%,#ffb03d);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .hero p.lead{
+    font-size:19px;line-height:1.55;color:var(--ink-soft);
+    max-width:480px;margin:0 0 32px;
+  }
+  .hero-ctas{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px;}
+  .reassure{
+    font-size:13.5px;color:var(--ink-soft);
+    display:flex;align-items:center;gap:8px;
+  }
+  .reassure svg{flex:none;}
+
+  /* Trip card */
+  .trip-card{
+    position:relative;
+    border-radius:24px;
+    height:420px;
+    overflow:hidden;
+    box-shadow:var(--shadow-lg);
+    background:
+      radial-gradient(120% 100% at 15% 0%, rgba(255,255,255,.35), transparent 45%),
+      linear-gradient(160deg,#ff8b6a 0%,#ff6b57 35%,#c94b8f 70%,#5b4bce 100%);
+    transform:rotate(1.2deg);
+    transition:transform .4s var(--ease), box-shadow .4s var(--ease);
+    cursor:pointer;
+  }
+  .trip-card:hover{transform:rotate(0deg) translateY(-6px);box-shadow:0 30px 70px rgba(21,19,33,.28);}
+  .trip-card:active{transform:rotate(0deg) translateY(-2px) scale(.99);}
+  .trip-card .sky{
+    position:absolute;inset:0;
+    background-image:
+      radial-gradient(60px 60px at 78% 22%, rgba(255,255,255,.9), rgba(255,255,255,0) 70%),
+      linear-gradient(0deg, rgba(0,0,0,.15), transparent 40%);
+  }
+  .trip-card .hills{
+    position:absolute;left:-10%;right:-10%;bottom:-6%;height:46%;
+    background:linear-gradient(180deg, rgba(0,0,0,0), rgba(30,15,40,.55));
+    border-radius:50% 50% 0 0 / 100% 100% 0 0;
+  }
+  .trip-card .badge{
+    position:absolute;top:20px;left:20px;
+    background:rgba(255,255,255,.9);
+    color:var(--ink);
+    font-size:12px;font-weight:700;letter-spacing:.02em;
+    padding:6px 12px;border-radius:999px;
+    box-shadow:var(--shadow-sm);
+  }
+  .trip-card .info{
+    position:absolute;left:24px;right:24px;bottom:24px;color:#fff;
+  }
+  .trip-card .info .city{
+    font-size:28px;font-weight:800;letter-spacing:-.02em;
+    text-shadow:0 2px 16px rgba(0,0,0,.25);
+  }
+  .trip-card .info .dates{
+    font-size:14.5px;opacity:.92;margin-top:4px;
+    display:flex;align-items:center;gap:6px;
+  }
+
+  /* ---------- Section shared ---------- */
+  section{padding:96px 0;}
+  .section-head{max-width:560px;margin:0 auto 52px;text-align:center;}
+  .kicker{
+    font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--accent-ink);
+    background:rgba(255,107,87,.12);
+    display:inline-block;padding:5px 12px;border-radius:999px;margin-bottom:16px;
+  }
+  .section-head h2{
+    font-size:clamp(28px,3.4vw,38px);letter-spacing:-.02em;margin:0 0 12px;
+  }
+  .section-head p{font-size:16.5px;color:var(--ink-soft);line-height:1.6;margin:0;}
+
+  /* ---------- Features ---------- */
+  .features{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .feature-grid{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:24px;
+  }
+  .feature-card{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:32px 26px;
+    transition:transform .25s var(--ease), box-shadow .25s var(--ease), border-color .25s var(--ease);
+  }
+  .feature-card:hover{
+    transform:translateY(-6px);
+    box-shadow:var(--shadow-md);
+    border-color:transparent;
+  }
+  .feature-icon{
+    width:52px;height:52px;border-radius:14px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:24px;margin-bottom:20px;
+    background:linear-gradient(135deg, rgba(255,107,87,.18), rgba(255,176,61,.18));
+  }
+  .feature-card h3{font-size:18.5px;margin:0 0 10px;letter-spacing:-.01em;}
+  .feature-card p{font-size:14.5px;line-height:1.6;color:var(--ink-soft);margin:0;}
+
+  /* ---------- Destinations ---------- */
+  .dest-strip{
+    display:grid;grid-template-columns:repeat(5,1fr);gap:18px;
+  }
+  .dest-card{
+    position:relative;
+    border-radius:16px;
+    height:230px;
+    overflow:hidden;
+    cursor:pointer;
+    box-shadow:var(--shadow-sm);
+    transition:transform .3s var(--ease), box-shadow .3s var(--ease);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .dest-card:hover{transform:translateY(-8px);box-shadow:var(--shadow-md);}
+  .dest-card:active{transform:translateY(-4px) scale(.98);}
+  .dest-card .fill{
+    position:absolute;inset:0;
+    transition:transform .5s var(--ease);
+  }
+  .dest-card:hover .fill{transform:scale(1.08);}
+  .dest-card .shade{
+    position:absolute;inset:0;
+    background:linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.55) 100%);
+  }
+  .dest-card .label{
+    position:absolute;left:16px;right:16px;bottom:16px;color:#fff;
+  }
+  .dest-card .label .city{font-size:17px;font-weight:800;letter-spacing:-.01em;}
+  .dest-card .label .country{font-size:12.5px;opacity:.85;margin-top:2px;}
+
+  .d1 .fill{background:linear-gradient(160deg,#ff9a6c,#ff5f6d 60%,#a1447c);}
+  .d2 .fill{background:linear-gradient(160deg,#6bd8e0,#3aa5c9 55%,#2c5fa8);}
+  .d3 .fill{background:linear-gradient(160deg,#a0e6c8,#4fb894 55%,#276b6f);}
+  .d4 .fill{background:linear-gradient(160deg,#ffd27a,#f7955a 55%,#c1584f);}
+  .d5 .fill{background:linear-gradient(160deg,#c9b6ff,#8a7bdb 55%,#4b4f9c);}
+
+  /* ---------- Pricing ---------- */
+  .pricing{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .plan-grid{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:24px;align-items:stretch;
+  }
+  .plan{
+    position:relative;
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:34px 28px;
+    display:flex;flex-direction:column;
+    transition:transform .25s var(--ease), box-shadow .25s var(--ease);
+  }
+  .plan:hover{transform:translateY(-6px);box-shadow:var(--shadow-md);}
+  .plan.recommended{
+    background:linear-gradient(180deg,#1c1830,#151223);
+    color:#fff;
+    border-color:transparent;
+    box-shadow:0 20px 50px rgba(21,19,33,.28);
+    transform:scale(1.035);
+  }
+  .plan.recommended:hover{transform:scale(1.035) translateY(-6px);}
+  .plan-tag{
+    position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+    background:linear-gradient(135deg,#ff6b57,#ff8a3d);
+    color:#fff;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    padding:6px 14px;border-radius:999px;box-shadow:0 8px 18px rgba(255,107,87,.4);
+  }
+  .plan h3{font-size:17px;margin:4px 0 6px;font-weight:700;}
+  .plan .price{font-size:38px;font-weight:800;letter-spacing:-.02em;margin:6px 0 2px;}
+  .plan .price span{font-size:14px;font-weight:500;opacity:.6;}
+  .plan.recommended .muted, .plan.recommended p{color:rgba(255,255,255,.65);}
+  .plan .cadence{font-size:13.5px;color:var(--ink-soft);margin:0 0 22px;}
+  .plan.recommended .cadence{color:rgba(255,255,255,.6);}
+  .plan ul{list-style:none;margin:0 0 28px;padding:0;flex:1;}
+  .plan li{
+    font-size:14.5px;padding:9px 0;border-top:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;
+  }
+  .plan.recommended li{border-top-color:rgba(255,255,255,.12);}
+  .plan li:first-child{border-top:none;}
+  .plan li svg{flex:none;}
+  .plan.recommended .btn-secondary{background:#fff;color:var(--ink);border-color:transparent;}
+  .plan.recommended .btn-secondary:hover{box-shadow:0 8px 20px rgba(0,0,0,.35);}
+
+  /* ---------- Footer ---------- */
+  footer{padding:64px 0 40px;}
+  .footer-top{
+    display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;
+    padding-bottom:44px;
+  }
+  .footer-cols{display:flex;gap:64px;}
+  .footer-col h4{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin:0 0 16px;}
+  .footer-col ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px;}
+  .footer-col a{font-size:14.5px;color:var(--ink-soft);transition:color .15s;}
+  .footer-col a:hover{color:var(--ink);}
+  .footer-brand p{color:var(--ink-soft);font-size:14px;max-width:260px;margin:12px 0 0;}
+  .footer-bottom{
+    border-top:1px solid var(--line);padding-top:24px;
+    font-size:13px;color:var(--ink-soft);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  }
+
+  /* ---------- Bottom sheet ---------- */
+  .overlay{
+    position:fixed;inset:0;
+    background:rgba(15,13,25,.5);
+    opacity:0;pointer-events:none;
+    transition:opacity .32s var(--ease);
+    z-index:90;
+  }
+  .overlay.visible{opacity:1;pointer-events:auto;}
+
+  .sheet{
+    position:fixed;left:0;right:0;bottom:0;
+    height:66.67vh;
+    max-height:640px;
+    background:var(--card);
+    border-radius:24px 24px 0 0;
+    box-shadow:0 -20px 60px rgba(21,19,33,.35);
+    transform:translateY(100%);
+    z-index:91;
+    display:flex;flex-direction:column;
+    padding:0 32px 32px;
+    touch-action:none;
+  }
+  .sheet.dragging{transition:none;}
+  .sheet.animate{transition:transform .38s var(--ease);}
+
+  .sheet-handle-area{
+    padding:14px 0 8px;
+    display:flex;justify-content:center;
+    cursor:grab;
+    touch-action:none;
+  }
+  .sheet-handle-area:active{cursor:grabbing;}
+  .sheet-handle{
+    width:44px;height:5px;border-radius:999px;background:#ddd8ea;
+    transition:background .2s;
+  }
+  .sheet-handle-area:hover .sheet-handle{background:#c7c0dc;}
+
+  .sheet-content{overflow-y:auto;flex:1;}
+  .sheet-kicker{
+    font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--accent-ink);margin-bottom:8px;
+  }
+  .sheet h2{font-size:27px;margin:0 0 12px;letter-spacing:-.02em;}
+  .sheet p.desc{font-size:15px;line-height:1.6;color:var(--ink-soft);margin:0 0 26px;max-width:520px;}
+
+  .detail-rows{
+    border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:28px;
+  }
+  .detail-row{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:15px 18px;font-size:14.5px;
+    border-top:1px solid var(--line);
+  }
+  .detail-row:first-child{border-top:none;}
+  .detail-row .k{color:var(--ink-soft);}
+  .detail-row .v{font-weight:600;}
+
+  .sheet-actions{display:flex;gap:12px;}
+
+  @media (max-width: 980px){
+    .hero{grid-template-columns:1fr;}
+    .feature-grid{grid-template-columns:1fr;}
+    .dest-strip{grid-template-columns:repeat(2,1fr);}
+    .plan-grid{grid-template-columns:1fr;}
+    .plan.recommended{transform:none;}
+    .plan.recommended:hover{transform:translateY(-6px);}
+    .nav-links{display:none;}
+    .footer-top{flex-direction:column;}
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="wordmark"><span class="dot"></span>Wander</div>
+    <ul class="nav-links">
+      <li><a href="#destinations">Destinations</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+      <li><a href="#about">About</a></li>
+    </ul>
+    <button class="btn btn-primary" id="navCta">Get started</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <div>
+      <h1>Plan trips you'll<br><em>actually take.</em></h1>
+      <p class="lead">Wander turns a scattered list of ideas into a day-by-day itinerary — flights, stays, and things to do — in about the time it takes to make coffee.</p>
+      <div class="hero-ctas">
+        <button class="btn btn-primary" id="planTripBtn">Plan a trip</button>
+        <button class="btn btn-secondary" id="watchDemoBtn">▶ Watch demo</button>
+      </div>
+      <div class="reassure">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Free to start · No credit card required
+      </div>
+    </div>
+
+    <div class="trip-card" id="heroTripCard" data-dest="kyoto" tabindex="0" role="button" aria-label="Open Kyoto trip details">
+      <div class="sky"></div>
+      <div class="hills"></div>
+      <div class="badge">Upcoming trip</div>
+      <div class="info">
+        <div class="city">Kyoto, Japan</div>
+        <div class="dates">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="#fff" stroke-width="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+          Apr 3 – Apr 9
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Why Wander</span>
+        <h2>Everything but the packing.</h2>
+        <p>We handle the planning grind so your trip feels like an adventure, not a spreadsheet.</p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🧭</div>
+          <h3>Smart itineraries</h3>
+          <p>Tell us your dates and interests. We build a day-by-day plan that actually makes sense to follow.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💸</div>
+          <h3>Price watch</h3>
+          <p>We track flights and stays for your trip and nudge you the moment prices drop.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📍</div>
+          <h3>Offline maps</h3>
+          <p>Every itinerary comes with offline maps and directions, so signal is never a requirement.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="destinations">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Popular right now</span>
+        <h2>Where Wanderers are headed</h2>
+        <p>A running list of the places our community is booking most this season.</p>
+      </div>
+      <div class="dest-strip">
+        <div class="dest-card d1" data-dest="kyoto" tabindex="0" role="button" aria-label="Open Kyoto trip details">
+          <div class="fill"></div><div class="shade"></div>
+          <div class="label"><div class="city">Kyoto</div><div class="country">Japan</div></div>
+        </div>
+        <div class="dest-card d2" data-dest="lisbon" tabindex="0" role="button" aria-label="Open Lisbon trip details">
+          <div class="fill"></div><div class="shade"></div>
+          <div class="label"><div class="city">Lisbon</div><div class="country">Portugal</div></div>
+        </div>
+        <div class="dest-card d3" data-dest="reykjavik" tabindex="0" role="button" aria-label="Open Reykjavik trip details">
+          <div class="fill"></div><div class="shade"></div>
+          <div class="label"><div class="city">Reykjavík</div><div class="country">Iceland</div></div>
+        </div>
+        <div class="dest-card d4" data-dest="marrakech" tabindex="0" role="button" aria-label="Open Marrakech trip details">
+          <div class="fill"></div><div class="shade"></div>
+          <div class="label"><div class="city">Marrakech</div><div class="country">Morocco</div></div>
+        </div>
+        <div class="dest-card d5" data-dest="queenstown" tabindex="0" role="button" aria-label="Open Queenstown trip details">
+          <div class="fill"></div><div class="shade"></div>
+          <div class="label"><div class="city">Queenstown</div><div class="country">New Zealand</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pricing" id="pricing">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Pricing</span>
+        <h2>Start free. Upgrade when it pays for itself.</h2>
+        <p>Every plan includes the core itinerary builder — pick the one that matches how often you travel.</p>
+      </div>
+      <div class="plan-grid">
+        <div class="plan">
+          <h3>Free</h3>
+          <div class="price">$0<span>/mo</span></div>
+          <p class="cadence">Forever free</p>
+          <ul>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>1 active trip</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Basic itinerary builder</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Community tips</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Email support</li>
+          </ul>
+          <button class="btn btn-secondary btn-block plan-cta">Get started</button>
+        </div>
+        <div class="plan recommended">
+          <span class="plan-tag">Most popular</span>
+          <h3>Plus</h3>
+          <div class="price">$9<span>/mo</span></div>
+          <p class="cadence">Billed monthly</p>
+          <ul>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#ff8a3d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Unlimited trips</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#ff8a3d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Price-drop alerts</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#ff8a3d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Offline maps</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#ff8a3d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Priority support</li>
+          </ul>
+          <button class="btn btn-secondary btn-block plan-cta">Start free trial</button>
+        </div>
+        <div class="plan">
+          <h3>Family</h3>
+          <div class="price">$16<span>/mo</span></div>
+          <p class="cadence">Billed monthly</p>
+          <ul>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Everything in Plus</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Up to 5 travelers</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Shared itineraries</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#2fb8a8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Group expense splitting</li>
+          </ul>
+          <button class="btn btn-secondary btn-block plan-cta">Get started</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer id="about">
+  <div class="wrap footer-top">
+    <div class="footer-brand">
+      <div class="wordmark"><span class="dot"></span>Wander</div>
+      <p>The fastest way from "we should go somewhere" to a trip you're actually excited about.</p>
+    </div>
+    <div class="footer-cols">
+      <div class="footer-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#destinations">Destinations</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#">Features</a></li>
+          <li><a href="#">Mobile app</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="#about">About</a></li>
+          <li><a href="#">Careers</a></li>
+          <li><a href="#">Blog</a></li>
+          <li><a href="#">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <span>© 2026 Wander. All rights reserved.</span>
+    <span>Made for people who'd rather be somewhere else.</span>
+  </div>
+</footer>
+
+<div class="overlay" id="overlay"></div>
+<div class="sheet" id="sheet" aria-hidden="true">
+  <div class="sheet-handle-area" id="sheetHandle">
+    <div class="sheet-handle"></div>
+  </div>
+  <div class="sheet-content">
+    <div class="sheet-kicker" id="sheetKicker">Trip details</div>
+    <h2 id="sheetTitle">Kyoto, Japan</h2>
+    <p class="desc" id="sheetDesc">Temples, quiet gardens, and some of the best food you'll eat all year — early April lands right in cherry blossom season.</p>
+    <div class="detail-rows" id="sheetRows"></div>
+    <div class="sheet-actions">
+      <button class="btn btn-primary" id="sheetPrimaryBtn">Start this itinerary</button>
+      <button class="btn btn-ghost" id="sheetCloseBtn">Not now</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var DESTS = {
+    kyoto: {
+      title: "Kyoto, Japan",
+      kicker: "Trip details",
+      desc: "Temples, quiet gardens, and some of the best food you'll eat all year — early April lands right in cherry blossom season.",
+      rows: [["Best time to go","Late Mar – May"],["Avg. flight time","11h 40m"],["Typical daily budget","$110 / day"],["Local currency","Japanese Yen (¥)"]]
+    },
+    lisbon: {
+      title: "Lisbon, Portugal",
+      kicker: "Trip details",
+      desc: "Sun-bleached tiles, custard tarts, and a coastline you can day-trip to. Easy to fall in love with, easy on the wallet too.",
+      rows: [["Best time to go","Apr – Jun, Sep"],["Avg. flight time","7h 50m"],["Typical daily budget","$85 / day"],["Local currency","Euro (€)"]]
+    },
+    reykjavik: {
+      title: "Reykjavík, Iceland",
+      kicker: "Trip details",
+      desc: "Glaciers, hot springs, and northern lights in winter — one of the most dramatic landscapes you can reach in a single flight.",
+      rows: [["Best time to go","Jun – Aug, or Sept – Mar"],["Avg. flight time","5h 20m"],["Typical daily budget","$140 / day"],["Local currency","Icelandic Króna (kr)"]]
+    },
+    marrakech: {
+      title: "Marrakech, Morocco",
+      kicker: "Trip details",
+      desc: "Maze-like souks, riads tucked behind unmarked doors, and the Atlas Mountains rising just beyond the city.",
+      rows: [["Best time to go","Mar – May, Oct – Nov"],["Avg. flight time","8h 10m"],["Typical daily budget","$65 / day"],["Local currency","Moroccan Dirham (MAD)"]]
+    },
+    queenstown: {
+      title: "Queenstown, New Zealand",
+      kicker: "Trip details",
+      desc: "Alpine lakes, adrenaline sports, and some of the most cinematic hiking trails on the planet.",
+      rows: [["Best time to go","Dec – Feb (summer)"],["Avg. flight time","15h 30m"],["Typical daily budget","$120 / day"],["Local currency","NZ Dollar (NZ$)"]]
+    },
+    plan: {
+      title: "Start planning your trip",
+      kicker: "New trip",
+      desc: "Pick a destination, tell us roughly when you want to go, and we'll draft a full itinerary for you to tweak.",
+      rows: [["Destination","Not selected yet"],["Dates","Flexible"],["Travelers","1 adult"],["Budget","Not set"]]
+    }
+  };
+
+  var overlay = document.getElementById('overlay');
+  var sheet = document.getElementById('sheet');
+  var sheetHandle = document.getElementById('sheetHandle');
+  var sheetTitle = document.getElementById('sheetTitle');
+  var sheetKicker = document.getElementById('sheetKicker');
+  var sheetDesc = document.getElementById('sheetDesc');
+  var sheetRows = document.getElementById('sheetRows');
+  var sheetCloseBtn = document.getElementById('sheetCloseBtn');
+  var sheetPrimaryBtn = document.getElementById('sheetPrimaryBtn');
+
+  var sheetHeight = 0;
+  var isOpen = false;
+
+  function fillSheet(key){
+    var d = DESTS[key] || DESTS.plan;
+    sheetKicker.textContent = d.kicker;
+    sheetTitle.textContent = d.title;
+    sheetDesc.textContent = d.desc;
+    sheetRows.innerHTML = '';
+    d.rows.forEach(function(r){
+      var row = document.createElement('div');
+      row.className = 'detail-row';
+      var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
+      var v = document.createElement('span'); v.className = 'v'; v.textContent = r[1];
+      row.appendChild(k); row.appendChild(v);
+      sheetRows.appendChild(row);
+    });
+    sheetPrimaryBtn.textContent = key === 'plan' ? 'Choose a destination' : 'Start this itinerary';
+  }
+
+  function openSheet(key){
+    fillSheet(key);
+    sheet.classList.remove('dragging');
+    sheet.classList.add('animate');
+    sheet.style.transform = 'translateY(0)';
+    overlay.classList.add('visible');
+    sheet.setAttribute('aria-hidden','false');
+    isOpen = true;
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSheet(){
+    sheet.classList.add('animate');
+    sheet.classList.remove('dragging');
+    sheet.style.transform = 'translateY(100%)';
+    overlay.classList.remove('visible');
+    sheet.setAttribute('aria-hidden','true');
+    isOpen = false;
+    document.body.style.overflow = '';
+  }
+
+  document.querySelectorAll('[data-dest]').forEach(function(el){
+    el.addEventListener('click', function(){ openSheet(el.getAttribute('data-dest')); });
+    el.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openSheet(el.getAttribute('data-dest')); }
+    });
+  });
+  document.getElementById('planTripBtn').addEventListener('click', function(){ openSheet('plan'); });
+  document.getElementById('navCta').addEventListener('click', function(){ openSheet('plan'); });
+  document.querySelectorAll('.plan-cta').forEach(function(btn){
+    btn.addEventListener('click', function(){ openSheet('plan'); });
+  });
+  document.getElementById('watchDemoBtn').addEventListener('click', function(){ openSheet('plan'); });
+  sheetCloseBtn.addEventListener('click', closeSheet);
+  sheetPrimaryBtn.addEventListener('click', closeSheet);
+  overlay.addEventListener('click', closeSheet);
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && isOpen) closeSheet(); });
+
+  /* ---------- Drag to move / dismiss ---------- */
+  var dragging = false;
+  var startY = 0;
+  var startTranslate = 0;
+  var currentTranslate = 0;
+  var lastY = 0;
+  var lastT = 0;
+  var velocity = 0;
+
+  function getTranslateY(){
+    var t = getComputedStyle(sheet).transform;
+    if(t === 'none') return 0;
+    var m = t.match(/matrix\(([^)]+)\)/);
+    if(!m) return 0;
+    var parts = m[1].split(',').map(parseFloat);
+    return parts[5] || 0;
+  }
+
+  function onPointerDown(e){
+    if(!isOpen) return;
+    dragging = true;
+    sheetHeight = sheet.offsetHeight;
+    startY = e.clientY;
+    startTranslate = getTranslateY();
+    currentTranslate = startTranslate;
+    lastY = e.clientY;
+    lastT = performance.now();
+    velocity = 0;
+    sheet.classList.remove('animate');
+    sheet.classList.add('dragging');
+    if(sheetHandle.setPointerCapture && e.pointerId != null){
+      try{ sheetHandle.setPointerCapture(e.pointerId); }catch(err){}
+    }
+    e.preventDefault();
+  }
+
+  function onPointerMove(e){
+    if(!dragging) return;
+    var dy = e.clientY - startY;
+    var target = startTranslate + dy;
+    if(target < 0){
+      target = target * 0.28;
+    }
+    var maxT = sheetHeight;
+    if(target > maxT) target = maxT;
+    currentTranslate = target;
+    sheet.style.transform = 'translateY(' + target + 'px)';
+
+    var now = performance.now();
+    var dt = now - lastT;
+    if(dt > 0){
+      velocity = (e.clientY - lastY) / dt;
+    }
+    lastY = e.clientY;
+    lastT = now;
+  }
+
+  function onPointerUp(){
+    if(!dragging) return;
+    dragging = false;
+    sheet.classList.remove('dragging');
+    sheet.classList.add('animate');
+
+    var dismissThreshold = sheetHeight * 0.28;
+    var shouldClose = currentTranslate > dismissThreshold || velocity > 0.65;
+
+    if(shouldClose){
+      closeSheet();
+    }else{
+      sheet.style.transform = 'translateY(0)';
+    }
+  }
+
+  sheetHandle.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+
+  /* Fallback touch support for browsers without full Pointer Events on the handle */
+  sheetHandle.addEventListener('touchstart', function(e){
+    if(e.touches && e.touches[0]){
+      onPointerDown({ clientY: e.touches[0].clientY, pointerId: null, preventDefault: function(){ e.preventDefault(); } });
+    }
+  }, {passive:false});
+  window.addEventListener('touchmove', function(e){
+    if(dragging && e.touches && e.touches[0]){
+      onPointerMove({ clientY: e.touches[0].clientY });
+      e.preventDefault();
+    }
+  }, {passive:false});
+  window.addEventListener('touchend', onPointerUp);
+})();
+</script>
+
+</body>
+</html>

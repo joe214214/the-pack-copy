@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wander — Plan trips that feel like they planned themselves</title>
+<style>
+  :root{
+    --ink:#141322;
+    --ink-soft:#5b5a72;
+    --paper:#faf9fc;
+    --card:#ffffff;
+    --line: rgba(20,19,34,0.08);
+    --brand1:#6a5cff;
+    --brand2:#ff7a59;
+    --brand3:#22c6a8;
+    --shadow-sm: 0 2px 8px rgba(20,19,34,0.06);
+    --shadow-md: 0 12px 32px rgba(20,19,34,0.10);
+    --shadow-lg: 0 24px 64px rgba(20,19,34,0.18);
+    --radius: 20px;
+    --ease: cubic-bezier(.22,1,.36,1);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    color:var(--ink);
+    background:var(--paper);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none;}
+  img,svg{display:block;}
+  section{padding:0 32px;}
+  .wrap{max-width:1180px;margin:0 auto;}
+  h1,h2,h3{margin:0;line-height:1.1;}
+  p{margin:0;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:14px 26px;border-radius:999px;font-size:15px;font-weight:600;
+    transition:transform .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease), opacity .18s var(--ease);
+    white-space:nowrap;
+  }
+  .btn:active{transform:scale(.96);}
+  .btn-primary{
+    background:linear-gradient(135deg,var(--brand1),#8b6bff);
+    color:#fff;
+    box-shadow: 0 8px 20px rgba(106,92,255,0.35);
+  }
+  .btn-primary:hover{ box-shadow:0 12px 28px rgba(106,92,255,0.45); transform:translateY(-2px); }
+  .btn-secondary{
+    background:var(--card);
+    color:var(--ink);
+    border:1px solid var(--line);
+  }
+  .btn-secondary:hover{ border-color:rgba(20,19,34,0.2); transform:translateY(-2px); box-shadow:var(--shadow-sm); }
+  .btn-small{ padding:10px 18px; font-size:13px; }
+  .btn-ghost{
+    background:rgba(20,19,34,0.05);
+    color:var(--ink);
+  }
+  .btn-ghost:hover{ background:rgba(20,19,34,0.09); }
+
+  /* ---------- nav ---------- */
+  header{
+    position:sticky; top:0; z-index:40;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    background:rgba(250,249,252,0.78);
+    border-bottom:1px solid var(--line);
+  }
+  nav{
+    max-width:1180px;margin:0 auto;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 32px;
+  }
+  .wordmark{
+    font-size:22px;font-weight:800;letter-spacing:-0.02em;
+    display:flex;align-items:center;gap:8px;
+  }
+  .wordmark .dot{
+    width:10px;height:10px;border-radius:50%;
+    background:linear-gradient(135deg,var(--brand1),var(--brand2));
+    box-shadow:0 0 0 4px rgba(106,92,255,0.15);
+  }
+  .nav-links{
+    display:flex;gap:36px;
+    font-size:14.5px;font-weight:600;color:var(--ink-soft);
+  }
+  .nav-links a{ position:relative; padding:6px 0; transition:color .15s; }
+  .nav-links a:hover{ color:var(--ink); }
+  .nav-links a::after{
+    content:""; position:absolute; left:0; right:0; bottom:0; height:2px;
+    background:var(--ink); transform:scaleX(0); transform-origin:left;
+    transition:transform .2s var(--ease);
+  }
+  .nav-links a:hover::after{ transform:scaleX(1); }
+  .nav-cta{ display:flex; align-items:center; gap:18px; }
+
+  @media (max-width:860px){
+    .nav-links{display:none;}
+  }
+
+  /* ---------- hero ---------- */
+  .hero{
+    padding-top:88px; padding-bottom:96px;
+    position:relative;
+    overflow:hidden;
+  }
+  .hero::before{
+    content:"";
+    position:absolute; top:-220px; right:-160px;
+    width:640px;height:640px;border-radius:50%;
+    background: radial-gradient(circle at 30% 30%, rgba(106,92,255,0.20), rgba(106,92,255,0) 70%);
+    pointer-events:none;
+  }
+  .hero-grid{
+    display:grid; grid-template-columns:1.05fr 0.95fr; gap:64px; align-items:center;
+    position:relative;
+  }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:13px; font-weight:700; color:var(--brand1);
+    background:rgba(106,92,255,0.10); padding:8px 14px; border-radius:999px;
+    margin-bottom:22px;
+  }
+  .hero h1{
+    font-size:56px; font-weight:800; letter-spacing:-0.03em;
+    margin-bottom:20px;
+  }
+  .hero h1 span{
+    background:linear-gradient(135deg,var(--brand1),var(--brand2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .hero p.sub{
+    font-size:18.5px; color:var(--ink-soft); max-width:480px; margin-bottom:34px; line-height:1.55;
+  }
+  .hero-actions{ display:flex; gap:14px; align-items:center; margin-bottom:22px; flex-wrap:wrap;}
+  .reassure{
+    font-size:13.5px; color:var(--ink-soft); display:flex; align-items:center; gap:8px;
+  }
+  .reassure svg{ flex-shrink:0; }
+
+  /* trip card */
+  .trip-card-wrap{ display:flex; justify-content:center; position:relative; }
+  .trip-card{
+    width:340px; border-radius:28px; overflow:hidden;
+    background:var(--card); box-shadow:var(--shadow-lg);
+    transform:rotate(3deg);
+    transition:transform .4s var(--ease);
+  }
+  .trip-card-wrap:hover .trip-card{ transform:rotate(0deg) translateY(-4px); }
+  .trip-photo{
+    height:220px; position:relative;
+    background:linear-gradient(160deg,#ff9a6c 0%, #ff6a88 45%, #6a5cff 100%);
+  }
+  .trip-photo::after{
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(0deg, rgba(0,0,0,0.55), rgba(0,0,0,0) 55%);
+  }
+  .trip-photo .peak{
+    position:absolute; bottom:0; left:0; right:0; height:70%;
+  }
+  .trip-photo-label{
+    position:absolute; left:20px; right:20px; bottom:16px; z-index:2; color:#fff;
+  }
+  .trip-photo-label .city{ font-size:21px; font-weight:800; letter-spacing:-0.01em;}
+  .trip-photo-label .dates{ font-size:13px; opacity:0.9; margin-top:2px; }
+  .trip-badge{
+    position:absolute; top:14px; right:14px; z-index:2;
+    background:rgba(255,255,255,0.92); color:var(--ink);
+    font-size:11.5px; font-weight:700; padding:6px 11px; border-radius:999px;
+  }
+  .trip-card-body{ padding:18px 20px 22px; }
+  .trip-row{ display:flex; justify-content:space-between; align-items:center; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
+  .trip-row strong{ color:var(--ink); }
+  .trip-card-body .btn{ width:100%; }
+
+  @media (max-width:860px){
+    .hero-grid{ grid-template-columns:1fr; }
+    .hero h1{ font-size:40px; }
+    .trip-card-wrap{ margin-top:20px; }
+  }
+
+  /* ---------- section headers ---------- */
+  .section-head{ text-align:center; max-width:600px; margin:0 auto 52px; }
+  .section-head .eyebrow{ margin-bottom:14px; }
+  .section-head h2{ font-size:36px; font-weight:800; letter-spacing:-0.02em; margin-bottom:12px;}
+  .section-head p{ color:var(--ink-soft); font-size:16.5px; line-height:1.6; }
+
+  /* ---------- features ---------- */
+  .features{ padding-top:100px; padding-bottom:100px; }
+  .feature-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:24px; }
+  .feature-card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:32px 28px; transition:transform .25s var(--ease), box-shadow .25s var(--ease);
+  }
+  .feature-card:hover{ transform:translateY(-6px); box-shadow:var(--shadow-md); }
+  .feature-icon{
+    width:52px;height:52px;border-radius:16px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:24px; margin-bottom:20px;
+  }
+  .feature-icon.i1{ background:linear-gradient(135deg,#eef0ff,#dfe1ff); }
+  .feature-icon.i2{ background:linear-gradient(135deg,#fff0ea,#ffe4d6); }
+  .feature-icon.i3{ background:linear-gradient(135deg,#e6fbf5,#d3f6ec); }
+  .feature-card h3{ font-size:19px; font-weight:700; margin-bottom:10px; }
+  .feature-card p{ font-size:14.5px; color:var(--ink-soft); line-height:1.6; }
+  .feature-card p + p{ margin-top:4px; }
+
+  @media (max-width:860px){
+    .feature-grid{ grid-template-columns:1fr; }
+  }
+
+  /* ---------- destinations ---------- */
+  .destinations{ padding-top:20px; padding-bottom:100px; }
+  .dest-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:18px; }
+  .dest-card{
+    position:relative; border-radius:18px; overflow:hidden; height:260px;
+    cursor:pointer; border:none; padding:0; text-align:left;
+    transition:transform .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .dest-card:hover{ transform:translateY(-6px); box-shadow:var(--shadow-md); }
+  .dest-card:active{ transform:translateY(-2px) scale(.98); }
+  .dest-card .g{ position:absolute; inset:0; }
+  .dest-card::after{
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(0deg, rgba(0,0,0,0.65), rgba(0,0,0,0.05) 60%);
+  }
+  .dest-label{ position:absolute; left:16px; right:16px; bottom:14px; z-index:2; color:#fff; }
+  .dest-label .city{ font-weight:800; font-size:17px; }
+  .dest-label .country{ font-size:12.5px; opacity:0.85; margin-top:2px;}
+  .g1{ background:linear-gradient(160deg,#ff9a6c,#ff5f7e); }
+  .g2{ background:linear-gradient(160deg,#5fc0ff,#5b6bff); }
+  .g3{ background:linear-gradient(160deg,#8ee6c0,#3aa1c9); }
+  .g4{ background:linear-gradient(160deg,#ffd66c,#ff7a5c); }
+  .g5{ background:linear-gradient(160deg,#c69bff,#6a5cff); }
+
+  @media (max-width:1000px){ .dest-grid{ grid-template-columns:repeat(3,1fr);} .dest-card{height:220px;} }
+  @media (max-width:640px){ .dest-grid{ grid-template-columns:repeat(2,1fr);} }
+
+  /* ---------- pricing ---------- */
+  .pricing{ padding-top:20px; padding-bottom:110px; }
+  .price-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:24px; align-items:stretch; }
+  .price-card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:34px 30px; display:flex; flex-direction:column;
+    transition:transform .25s var(--ease), box-shadow .25s var(--ease);
+  }
+  .price-card:hover{ transform:translateY(-6px); box-shadow:var(--shadow-md); }
+  .price-card.featured{
+    background:linear-gradient(160deg,#171531,#232049);
+    color:#fff; border:none; position:relative;
+    box-shadow:var(--shadow-lg);
+  }
+  .price-card.featured .plan-desc{ color:rgba(255,255,255,0.65); }
+  .rec-badge{
+    position:absolute; top:-14px; left:50%; transform:translateX(-50%);
+    background:linear-gradient(135deg,var(--brand2),#ff9a6c);
+    color:#fff; font-size:12px; font-weight:700; padding:6px 16px; border-radius:999px;
+    box-shadow:0 6px 16px rgba(255,122,89,0.4);
+  }
+  .plan-name{ font-size:14px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-soft); margin-bottom:14px; }
+  .price-card.featured .plan-name{ color:rgba(255,255,255,0.65); }
+  .plan-price{ font-size:42px; font-weight:800; letter-spacing:-0.02em; margin-bottom:2px; }
+  .plan-price span{ font-size:15px; font-weight:600; color:var(--ink-soft); }
+  .price-card.featured .plan-price span{ color:rgba(255,255,255,0.6); }
+  .plan-desc{ font-size:13.5px; color:var(--ink-soft); margin-bottom:24px; }
+  .plan-list{ list-style:none; padding:0; margin:0 0 28px; flex-grow:1; }
+  .plan-list li{
+    display:flex; align-items:flex-start; gap:10px; font-size:14px; margin-bottom:14px; color:var(--ink);
+  }
+  .price-card.featured .plan-list li{ color:rgba(255,255,255,0.9); }
+  .plan-list svg{ flex-shrink:0; margin-top:2px; }
+  .price-card .btn{ width:100%; }
+
+  @media (max-width:860px){ .price-grid{ grid-template-columns:1fr; } .rec-badge{ top:16px; right:16px; left:auto; transform:none; } }
+
+  /* ---------- footer ---------- */
+  footer{
+    border-top:1px solid var(--line); padding:56px 32px 36px;
+    background:#fff;
+  }
+  .footer-grid{
+    display:flex; justify-content:space-between; gap:40px; flex-wrap:wrap;
+    padding-bottom:36px;
+  }
+  .footer-cols{ display:flex; gap:64px; }
+  .footer-col h4{ font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-soft); margin-bottom:16px; font-weight:700; }
+  .footer-col a{ display:block; font-size:14.5px; color:var(--ink); margin-bottom:12px; transition:color .15s; }
+  .footer-col a:hover{ color:var(--brand1); }
+  .footer-bottom{
+    border-top:1px solid var(--line); padding-top:24px;
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;
+    font-size:13px; color:var(--ink-soft);
+  }
+  @media (max-width:640px){ .footer-grid{ flex-direction:column; } .footer-cols{ gap:40px; } }
+
+  /* ---------- sheet / backdrop ---------- */
+  .backdrop{
+    position:fixed; inset:0; background:rgba(15,14,28,0.45);
+    backdrop-filter: blur(2px);
+    opacity:0; pointer-events:none; z-index:90;
+    transition:opacity .32s var(--ease);
+  }
+  .backdrop.open{ opacity:1; pointer-events:auto; }
+
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:91;
+    height:68vh; max-height:720px;
+    background:var(--card);
+    border-radius:24px 24px 0 0;
+    box-shadow:0 -20px 60px rgba(15,14,28,0.28);
+    transform:translateY(100%);
+    transition:transform .38s var(--ease);
+    display:flex; flex-direction:column;
+    touch-action:none;
+  }
+  .sheet.open{ transform:translateY(0); }
+  .sheet.dragging{ transition:none; }
+
+  .sheet-handle-area{
+    padding:14px 0 8px; display:flex; justify-content:center; cursor:grab; flex-shrink:0;
+  }
+  .sheet-handle-area:active{ cursor:grabbing; }
+  .sheet-handle{
+    width:44px; height:5px; border-radius:999px; background:rgba(20,19,34,0.18);
+  }
+
+  .sheet-content{
+    padding:6px 40px 40px; overflow-y:auto; flex:1;
+  }
+  .sheet-photo{
+    height:150px; border-radius:18px; margin-bottom:24px; position:relative; overflow:hidden;
+  }
+  .sheet-photo-label{ position:absolute; left:18px; bottom:14px; color:#fff; font-weight:800; font-size:19px; }
+  .sheet h2{ font-size:26px; font-weight:800; letter-spacing:-0.02em; margin-bottom:10px; }
+  .sheet p.desc{ font-size:15px; color:var(--ink-soft); line-height:1.6; margin-bottom:26px; max-width:560px; }
+
+  .detail-rows{ border-top:1px solid var(--line); }
+  .detail-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:16px 0; border-bottom:1px solid var(--line); font-size:14.5px;
+  }
+  .detail-row .k{ display:flex; align-items:center; gap:10px; color:var(--ink-soft); }
+  .detail-row .v{ font-weight:700; color:var(--ink); }
+
+  .sheet-actions{ display:flex; gap:12px; margin-top:28px; }
+
+  @media (max-width:640px){
+    .sheet{ height:74vh; }
+    .sheet-content{ padding:6px 22px 32px; }
+  }
+
+  @media (max-width:520px){
+    .hero h1{ font-size:32px; }
+    section{ padding:0 20px; }
+    nav{ padding:14px 20px; }
+    .section-head h2{ font-size:28px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <nav>
+    <div class="wordmark"><span class="dot"></span>Wander</div>
+    <div class="nav-links">
+      <a href="#destinations">Destinations</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#about">About</a>
+    </div>
+    <div class="nav-cta">
+      <button class="btn btn-primary btn-small" id="navGetStarted">Get started</button>
+    </div>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">✈️ Now with AI day-planning</div>
+      <h1>Plan trips that feel like <span>they planned themselves</span></h1>
+      <p class="sub">Wander turns a few taps into a full itinerary — flights, stays, and things to do, all in one place, all in sync.</p>
+      <div class="hero-actions">
+        <button class="btn btn-primary" id="planTripBtn">Plan a trip</button>
+        <button class="btn btn-secondary" id="watchDemoBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" stroke="currentColor" stroke-width="1.6"/><path d="M10 8.5L16 12L10 15.5V8.5Z" fill="currentColor"/></svg>
+          Watch demo
+        </button>
+      </div>
+      <div class="reassure">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z" stroke="#22c6a8" stroke-width="1.6"/><path d="M9 12L11 14L15.5 9.5" stroke="#22c6a8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        No credit card required · Free forever plan
+      </div>
+    </div>
+    <div class="trip-card-wrap">
+      <div class="trip-card">
+        <div class="trip-photo">
+          <div class="trip-badge">Upcoming</div>
+          <div class="trip-photo-label">
+            <div class="city">Kyoto, Japan</div>
+            <div class="dates">Oct 12 – Oct 19</div>
+          </div>
+        </div>
+        <div class="trip-card-body">
+          <div class="trip-row"><span>Flights + 6 nights</span><strong>$1,240</strong></div>
+          <div class="trip-row"><span>Itinerary</span><strong>18 stops planned</strong></div>
+          <button class="btn btn-ghost" id="viewTripBtn">View trip</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features" id="about">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow" style="justify-content:center;">Why Wander</div>
+      <h2>Everything for the trip, nothing for the hassle</h2>
+      <p>Three things Wander is quietly obsessed with getting right.</p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon i1">🧭</div>
+        <h3>Smart itineraries</h3>
+        <p>Wander builds a day-by-day plan based on your pace and interests.</p>
+        <p>Drag to reorder — the schedule quietly rebalances itself.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon i2">💸</div>
+        <h3>Real-time prices</h3>
+        <p>Flights and stays are tracked around the clock in the background.</p>
+        <p>We'll nudge you the moment your trip gets cheaper.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon i3">🤝</div>
+        <h3>Built for groups</h3>
+        <p>Share one plan and let everyone vote, add stops, or split costs.</p>
+        <p>No more twelve-thread group chats about hotels.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="destinations" id="destinations">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow" style="justify-content:center;">Popular right now</div>
+      <h2>Where Wanderers are headed</h2>
+      <p>Tap a destination to preview a sample trip.</p>
+    </div>
+    <div class="dest-grid">
+      <button class="dest-card" data-city="Kyoto" data-country="Japan" data-g="g1">
+        <div class="g g1"></div>
+        <div class="dest-label"><div class="city">Kyoto</div><div class="country">Japan</div></div>
+      </button>
+      <button class="dest-card" data-city="Lisbon" data-country="Portugal" data-g="g2">
+        <div class="g g2"></div>
+        <div class="dest-label"><div class="city">Lisbon</div><div class="country">Portugal</div></div>
+      </button>
+      <button class="dest-card" data-city="Reykjavík" data-country="Iceland" data-g="g3">
+        <div class="g g3"></div>
+        <div class="dest-label"><div class="city">Reykjavík</div><div class="country">Iceland</div></div>
+      </button>
+      <button class="dest-card" data-city="Cape Town" data-country="South Africa" data-g="g4">
+        <div class="g g4"></div>
+        <div class="dest-label"><div class="city">Cape Town</div><div class="country">South Africa</div></div>
+      </button>
+      <button class="dest-card" data-city="Banff" data-country="Canada" data-g="g5">
+        <div class="g g5"></div>
+        <div class="dest-label"><div class="city">Banff</div><div class="country">Canada</div></div>
+      </button>
+    </div>
+  </div>
+</section>
+
+<section class="pricing" id="pricing">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow" style="justify-content:center;">Pricing</div>
+      <h2>Simple plans, no surprise fees</h2>
+      <p>Start free. Upgrade whenever your trips get bigger.</p>
+    </div>
+    <div class="price-grid">
+      <div class="price-card">
+        <div class="plan-name">Free</div>
+        <div class="plan-price">$0<span>/month</span></div>
+        <div class="plan-desc">For the occasional getaway.</div>
+        <ul class="plan-list">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>1 active trip</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Basic itinerary builder</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Price alerts, weekly</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Community guides</li>
+        </ul>
+        <button class="btn btn-secondary">Get started</button>
+      </div>
+      <div class="price-card featured">
+        <div class="rec-badge">Most popular</div>
+        <div class="plan-name">Plus</div>
+        <div class="plan-price">$9<span>/month</span></div>
+        <div class="plan-desc">For people who travel often.</div>
+        <ul class="plan-list">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#ff9a6c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Unlimited trips</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#ff9a6c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>AI-generated itineraries</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#ff9a6c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Real-time price alerts</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#ff9a6c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Offline itinerary access</li>
+        </ul>
+        <button class="btn btn-primary">Get started</button>
+      </div>
+      <div class="price-card">
+        <div class="plan-name">Family</div>
+        <div class="plan-price">$19<span>/month</span></div>
+        <div class="plan-desc">For trips with the whole crew.</div>
+        <ul class="plan-list">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Everything in Plus</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Up to 6 shared members</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Group voting & cost splitting</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13L10 18L19 7" stroke="#22c6a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Priority support</li>
+        </ul>
+        <button class="btn btn-secondary">Get started</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <div class="wordmark"><span class="dot"></span>Wander</div>
+        <p style="color:var(--ink-soft); font-size:14px; margin-top:14px; max-width:280px; line-height:1.6;">The simplest way to plan a trip you'll actually stick to.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col">
+          <h4>Product</h4>
+          <a href="#destinations">Destinations</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#about">About</a>
+          <a href="#">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <h4>Company</h4>
+          <a href="#">Careers</a>
+          <a href="#">Press</a>
+          <a href="#">Contact</a>
+          <a href="#">Support</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>© 2026 Wander, Inc. All rights reserved.</div>
+      <div>Made for wanderers, everywhere.</div>
+    </div>
+  </div>
+</footer>
+
+<!-- Bottom sheet -->
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true">
+  <div class="sheet-handle-area" id="sheetHandle">
+    <div class="sheet-handle"></div>
+  </div>
+  <div class="sheet-content">
+    <div class="sheet-photo" id="sheetPhoto"></div>
+    <h2 id="sheetTitle">Plan your trip</h2>
+    <p class="desc" id="sheetDesc">Tell us where and when — Wander fills in the rest with flights, stays, and a day-by-day plan you can reshuffle in a tap.</p>
+    <div class="detail-rows">
+      <div class="detail-row">
+        <span class="k">📅 Dates</span>
+        <span class="v" id="sheetDates">Flexible</span>
+      </div>
+      <div class="detail-row">
+        <span class="k">🧑‍🤝‍🧑 Travelers</span>
+        <span class="v" id="sheetTravelers">2 adults</span>
+      </div>
+      <div class="detail-row">
+        <span class="k">💰 Budget</span>
+        <span class="v" id="sheetBudget">$1,200 – $1,800</span>
+      </div>
+      <div class="detail-row">
+        <span class="k">🎒 Style</span>
+        <span class="v" id="sheetStyle">Balanced</span>
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-primary" id="sheetConfirm">Start planning</button>
+      <button class="btn btn-secondary" id="sheetClose">Not now</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var sheet = document.getElementById('sheet');
+  var backdrop = document.getElementById('backdrop');
+  var handle = document.getElementById('sheetHandle');
+  var photo = document.getElementById('sheetPhoto');
+  var title = document.getElementById('sheetTitle');
+  var desc = document.getElementById('sheetDesc');
+  var dates = document.getElementById('sheetDates');
+  var travelers = document.getElementById('sheetTravelers');
+  var budget = document.getElementById('sheetBudget');
+  var style = document.getElementById('sheetStyle');
+
+  var gradients = {
+    g1:'linear-gradient(160deg,#ff9a6c,#ff5f7e)',
+    g2:'linear-gradient(160deg,#5fc0ff,#5b6bff)',
+    g3:'linear-gradient(160deg,#8ee6c0,#3aa1c9)',
+    g4:'linear-gradient(160deg,#ffd66c,#ff7a5c)',
+    g5:'linear-gradient(160deg,#c69bff,#6a5cff)',
+    generic:'linear-gradient(160deg,#6a5cff,#ff7a59)'
+  };
+
+  var destInfo = {
+    'Kyoto': { desc:'Temples at dawn, quiet gardens, and the best bowl of ramen you will have this year.', dates:'Oct 12 – Oct 19', travelers:'2 adults', budget:'$1,100 – $1,500', style:'Cultural' },
+    'Lisbon': { desc:'Sun-bleached streets, pastel de nata breaks, and a coastline made for slow afternoons.', dates:'Sep 3 – Sep 9', travelers:'2 adults', budget:'$800 – $1,200', style:'Relaxed' },
+    'Reykjavík': { desc:'Glaciers, hot springs, and northern lights on the nights the sky cooperates.', dates:'Feb 14 – Feb 20', travelers:'4 adults', budget:'$1,600 – $2,200', style:'Adventure' },
+    'Cape Town': { desc:'Table Mountain sunrises, vineyard lunches, and a coastline that never stops surprising.', dates:'Nov 20 – Nov 29', travelers:'2 adults', budget:'$1,300 – $1,900', style:'Balanced' },
+    'Banff': { desc:'Turquoise lakes, mountain trails, and cabins that make you forget your inbox exists.', dates:'Jul 8 – Jul 14', travelers:'3 adults', budget:'$1,000 – $1,400', style:'Outdoors' }
+  };
+
+  function openSheetFor(data){
+    if(data){
+      var info = destInfo[data.city] || {};
+      photo.style.background = gradients[data.g] || gradients.generic;
+      title.textContent = data.city + ', ' + data.country;
+      desc.textContent = info.desc || ('A sample itinerary for ' + data.city + '.');
+      dates.textContent = info.dates || 'Flexible';
+      travelers.textContent = info.travelers || '2 adults';
+      budget.textContent = info.budget || '$1,000 – $1,500';
+      style.textContent = info.style || 'Balanced';
+    } else {
+      photo.style.background = gradients.generic;
+      title.textContent = 'Plan your trip';
+      desc.textContent = 'Tell us where and when — Wander fills in the rest with flights, stays, and a day-by-day plan you can reshuffle in a tap.';
+      dates.textContent = 'Flexible';
+      travelers.textContent = '2 adults';
+      budget.textContent = '$1,200 – $1,800';
+      style.textContent = 'Balanced';
+    }
+    sheet.style.transform = '';
+    backdrop.classList.add('open');
+    sheet.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSheet(){
+    backdrop.classList.remove('open');
+    sheet.classList.remove('open');
+    sheet.classList.remove('dragging');
+    sheet.style.transform = '';
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('planTripBtn').addEventListener('click', function(){ openSheetFor(null); });
+  document.getElementById('viewTripBtn').addEventListener('click', function(e){ e.stopPropagation(); openSheetFor({city:'Kyoto', country:'Japan', g:'g1'}); });
+  document.getElementById('navGetStarted').addEventListener('click', function(){ openSheetFor(null); });
+  document.getElementById('watchDemoBtn').addEventListener('click', function(){ openSheetFor(null); });
+
+  document.querySelectorAll('.dest-card').forEach(function(card){
+    card.addEventListener('click', function(){
+      openSheetFor({ city: card.dataset.city, country: card.dataset.country, g: card.dataset.g });
+    });
+  });
+
+  backdrop.addEventListener('click', closeSheet);
+  document.getElementById('sheetClose').addEventListener('click', closeSheet);
+  document.getElementById('sheetConfirm').addEventListener('click', closeSheet);
+
+  /* ---- drag to move / dismiss ---- */
+  var dragging = false;
+  var startY = 0;
+  var currentY = 0;
+  var sheetHeight = 0;
+  var lastY = 0;
+  var lastT = 0;
+  var velocity = 0;
+
+  function onPointerDown(e){
+    dragging = true;
+    sheet.classList.add('dragging');
+    startY = e.clientY;
+    currentY = 0;
+    lastY = e.clientY;
+    lastT = performance.now();
+    velocity = 0;
+    sheetHeight = sheet.getBoundingClientRect().height;
+    handle.setPointerCapture && handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+
+  function onPointerMove(e){
+    if(!dragging) return;
+    var dy = e.clientY - startY;
+    if(dy < 0) dy = dy * 0.15; /* resist dragging above open position */
+    currentY = dy;
+    sheet.style.transform = 'translateY(' + dy + 'px)';
+
+    var now = performance.now();
+    var dt = now - lastT;
+    if(dt > 0){
+      velocity = (e.clientY - lastY) / dt;
+      lastY = e.clientY;
+      lastT = now;
+    }
+  }
+
+  function onPointerUp(e){
+    if(!dragging) return;
+    dragging = false;
+    sheet.classList.remove('dragging');
+
+    var shouldClose = (currentY > sheetHeight * 0.32) || (velocity > 0.55);
+
+    if(shouldClose){
+      var startTransform = currentY;
+      sheet.style.transition = 'transform .28s cubic-bezier(.32,.72,0,1)';
+      sheet.style.transform = 'translateY(100%)';
+      setTimeout(function(){
+        sheet.style.transition = '';
+        closeSheet();
+      }, 260);
+    } else {
+      sheet.style.transform = '';
+    }
+  }
+
+  handle.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
+
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && sheet.classList.contains('open')) closeSheet();
+  });
+})();
+</script>
+
+</body>
+</html>
