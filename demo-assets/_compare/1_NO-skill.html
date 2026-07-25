@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wander — Travel planning. Reimagined.</title>
+<style>
+  :root{
+    --bg:#000000;
+    --bg-alt:#0a0a0c;
+    --panel:#111113;
+    --panel-2:#1c1c1e;
+    --text:#f5f5f7;
+    --text-dim:#a1a1a6;
+    --blue:#2997ff;
+    --blue-dim:#0071e3;
+    --radius:22px;
+    font-size:16px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none;}
+  img,svg{display:block;}
+
+  /* ---------- NAV ---------- */
+  header{
+    position:fixed;
+    top:0;left:0;right:0;
+    z-index:1000;
+    height:52px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(10,10,12,0.72);
+    backdrop-filter:saturate(180%) blur(20px);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid rgba(255,255,255,0.08);
+    transition:background .3s ease;
+  }
+  nav{
+    width:100%;
+    max-width:1024px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 20px;
+  }
+  .logo{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:15px;
+    font-weight:600;
+    letter-spacing:.2px;
+  }
+  .logo svg{width:18px;height:18px;}
+  .nav-links{
+    display:flex;
+    gap:30px;
+    list-style:none;
+    margin:0;padding:0;
+    font-size:12px;
+    font-weight:400;
+    color:var(--text-dim);
+  }
+  .nav-links a{transition:color .2s ease;}
+  .nav-links a:hover{color:var(--text);}
+  .nav-cta{
+    display:flex;
+    align-items:center;
+    gap:18px;
+    font-size:12px;
+  }
+  .btn-nav{
+    background:var(--text);
+    color:#000;
+    padding:6px 14px;
+    border-radius:980px;
+    font-weight:500;
+    font-size:12px;
+    transition:opacity .2s ease;
+  }
+  .btn-nav:hover{opacity:.8;}
+  .nav-toggle{display:none;background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;}
+
+  @media (max-width:734px){
+    .nav-links{display:none;}
+    .nav-toggle{display:block;}
+  }
+
+  section{
+    position:relative;
+    width:100%;
+    padding:120px 22px;
+    text-align:center;
+    overflow:hidden;
+  }
+
+  .eyebrow{
+    font-size:19px;
+    font-weight:600;
+    color:var(--text-dim);
+    margin-bottom:6px;
+  }
+  h1{
+    font-size:clamp(40px,7vw,80px);
+    font-weight:700;
+    letter-spacing:-.02em;
+    line-height:1.05;
+    margin:0 0 8px;
+    background:linear-gradient(180deg,#ffffff 0%,#c9c9cf 100%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  h2.section-title{
+    font-size:clamp(32px,5vw,56px);
+    font-weight:700;
+    letter-spacing:-.02em;
+    margin:0 0 12px;
+  }
+  .sub{
+    font-size:clamp(18px,2.4vw,28px);
+    color:var(--text-dim);
+    font-weight:400;
+    max-width:640px;
+    margin:0 auto 36px;
+    line-height:1.4;
+  }
+
+  /* ---------- HERO ---------- */
+  .hero{
+    padding-top:160px;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 0%, rgba(41,151,255,.25), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 20% 100%, rgba(191,90,242,.18), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 80% 90%, rgba(255,159,10,.14), transparent 60%),
+      var(--bg);
+  }
+  .hero .tagline{
+    font-size:14px;
+    font-weight:600;
+    letter-spacing:.5px;
+    text-transform:uppercase;
+    color:var(--blue);
+    margin-bottom:18px;
+  }
+  .btn-row{
+    display:flex;
+    gap:16px;
+    justify-content:center;
+    flex-wrap:wrap;
+    margin-top:8px;
+  }
+  .btn{
+    padding:13px 28px;
+    border-radius:980px;
+    font-size:17px;
+    font-weight:500;
+    cursor:pointer;
+    border:1px solid transparent;
+    transition:transform .15s ease, opacity .2s ease, background .2s ease;
+    display:inline-block;
+  }
+  .btn:active{transform:scale(.97);}
+  .btn-primary{
+    background:var(--blue-dim);
+    color:#fff;
+  }
+  .btn-primary:hover{background:var(--blue);}
+  .btn-secondary{
+    background:transparent;
+    color:var(--blue);
+    border:1px solid rgba(41,151,255,.5);
+  }
+  .btn-secondary:hover{background:rgba(41,151,255,.1);}
+
+  .hero-visual{
+    margin:70px auto 0;
+    max-width:900px;
+    height:420px;
+    border-radius:32px;
+    background:
+      linear-gradient(160deg, #1c1c1e 0%, #0a0a0c 60%),
+      radial-gradient(circle at 30% 20%, rgba(41,151,255,.35), transparent 55%);
+    border:1px solid rgba(255,255,255,.08);
+    position:relative;
+    box-shadow:0 40px 100px -20px rgba(0,0,0,.7);
+  }
+  .hero-visual .glass-card{
+    position:absolute;
+    left:50%;top:50%;
+    transform:translate(-50%,-50%);
+    width:86%;
+    height:78%;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:24px;
+    backdrop-filter:blur(6px);
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    padding:28px;
+    text-align:left;
+  }
+  .glass-card .pin{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:14px;
+    color:var(--text-dim);
+  }
+  .glass-card .pin-dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--blue);
+    box-shadow:0 0 12px 2px rgba(41,151,255,.8);
+  }
+  .glass-card .route{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    font-size:clamp(20px,3vw,32px);
+    font-weight:600;
+  }
+  .glass-card .route .arrow{color:var(--text-dim);font-weight:300;}
+  .glass-card .meta{
+    display:flex;
+    gap:24px;
+    font-size:13px;
+    color:var(--text-dim);
+  }
+  .glass-card .meta b{color:var(--text);font-weight:600;}
+
+  /* ---------- FEATURES ---------- */
+  .features{
+    background:var(--bg-alt);
+  }
+  .feature-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:20px;
+    max-width:1024px;
+    margin:0 auto;
+    text-align:left;
+  }
+  .feature-card{
+    background:linear-gradient(160deg,var(--panel-2),var(--panel));
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:var(--radius);
+    padding:36px 30px;
+    min-height:260px;
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    transition:transform .3s ease, border-color .3s ease;
+  }
+  .feature-card:hover{
+    transform:translateY(-6px);
+    border-color:rgba(255,255,255,.2);
+  }
+  .feature-icon{
+    width:44px;height:44px;
+    border-radius:12px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:22px;
+  }
+  .feature-card:nth-child(1) .feature-icon{background:linear-gradient(135deg,#2997ff,#0071e3);}
+  .feature-card:nth-child(2) .feature-icon{background:linear-gradient(135deg,#bf5af2,#8944ab);}
+  .feature-card:nth-child(3) .feature-icon{background:linear-gradient(135deg,#ff9f0a,#c76f00);}
+  .feature-card h3{
+    font-size:22px;
+    margin:0;
+    font-weight:600;
+  }
+  .feature-card p{
+    font-size:15px;
+    color:var(--text-dim);
+    line-height:1.6;
+    margin:0;
+  }
+
+  @media (max-width:900px){
+    .feature-grid{grid-template-columns:1fr;}
+  }
+
+  /* ---------- DESTINATIONS ---------- */
+  .destinations{background:var(--bg);}
+  .dest-scroll{
+    display:flex;
+    gap:18px;
+    overflow-x:auto;
+    max-width:1024px;
+    margin:0 auto;
+    padding:10px 4px 20px;
+    scroll-snap-type:x mandatory;
+  }
+  .dest-scroll::-webkit-scrollbar{height:6px;}
+  .dest-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:4px;}
+  .dest-card{
+    flex:0 0 220px;
+    height:320px;
+    border-radius:var(--radius);
+    position:relative;
+    overflow:hidden;
+    scroll-snap-align:start;
+    display:flex;
+    align-items:flex-end;
+    padding:22px;
+    text-align:left;
+    border:1px solid rgba(255,255,255,.08);
+    transition:transform .3s ease;
+  }
+  .dest-card:hover{transform:scale(1.03);}
+  .dest-card h4{
+    margin:0 0 4px;
+    font-size:20px;
+    font-weight:600;
+    position:relative;
+    z-index:2;
+  }
+  .dest-card span{
+    font-size:13px;
+    color:rgba(255,255,255,.85);
+    position:relative;
+    z-index:2;
+  }
+  .dest-card::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.75) 100%);
+    z-index:1;
+  }
+  .dest-1{background:linear-gradient(160deg,#ff9a56,#ff6a88,#845ec2);}
+  .dest-2{background:linear-gradient(160deg,#4facfe,#00f2fe);}
+  .dest-3{background:linear-gradient(160deg,#43cea2,#185a9d);}
+  .dest-4{background:linear-gradient(160deg,#f7971e,#ffd200);}
+  .dest-5{background:linear-gradient(160deg,#7f7fd5,#86a8e7,#91eae4);}
+
+  /* ---------- PRICING ---------- */
+  .pricing{background:var(--bg-alt);}
+  .price-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:20px;
+    max-width:1024px;
+    margin:0 auto;
+    text-align:left;
+  }
+  .price-card{
+    background:var(--panel);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:var(--radius);
+    padding:34px 28px;
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+    position:relative;
+  }
+  .price-card.highlight{
+    border:1px solid rgba(41,151,255,.5);
+    background:linear-gradient(160deg,#132437,var(--panel));
+  }
+  .price-badge{
+    position:absolute;
+    top:-13px;right:24px;
+    background:var(--blue-dim);
+    color:#fff;
+    font-size:11px;
+    font-weight:600;
+    padding:4px 12px;
+    border-radius:980px;
+    letter-spacing:.3px;
+  }
+  .price-card h3{margin:0;font-size:20px;font-weight:600;}
+  .price-amount{
+    font-size:40px;
+    font-weight:700;
+    letter-spacing:-.02em;
+  }
+  .price-amount span{
+    font-size:15px;
+    font-weight:400;
+    color:var(--text-dim);
+  }
+  .price-card ul{
+    list-style:none;
+    margin:0;padding:0;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    font-size:14px;
+    color:var(--text-dim);
+    flex:1;
+  }
+  .price-card ul li::before{
+    content:"✓ ";
+    color:var(--blue);
+    font-weight:700;
+  }
+  .price-card .btn{width:100%;text-align:center;}
+
+  @media (max-width:900px){
+    .price-grid{grid-template-columns:1fr;}
+  }
+
+  /* ---------- FOOTER ---------- */
+  footer{
+    background:var(--bg);
+    border-top:1px solid rgba(255,255,255,.1);
+    padding:40px 22px 30px;
+    font-size:12px;
+    color:var(--text-dim);
+  }
+  .footer-inner{
+    max-width:1024px;
+    margin:0 auto;
+    text-align:left;
+  }
+  .footer-links{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:24px;
+    border-bottom:1px solid rgba(255,255,255,.1);
+    padding-bottom:26px;
+    margin-bottom:20px;
+  }
+  .footer-links h5{
+    color:var(--text);
+    font-size:13px;
+    font-weight:600;
+    margin:0 0 14px;
+  }
+  .footer-links ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;}
+  .footer-links a{transition:color .2s ease;}
+  .footer-links a:hover{color:var(--text);}
+  .footer-bottom{
+    display:flex;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  @media (max-width:734px){
+    .footer-links{grid-template-columns:repeat(2,1fr);}
+  }
+
+  .fade-in{
+    opacity:0;
+    transform:translateY(24px);
+    transition:opacity .8s ease, transform .8s ease;
+  }
+  .fade-in.visible{
+    opacity:1;
+    transform:translateY(0);
+  }
+</style>
+</head>
+<body>
+
+<header id="site-header">
+  <nav>
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L2 21h20L12 2z" fill="#2997ff"/></svg>
+      Wander
+    </div>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#destinations">Destinations</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a href="#pricing" class="btn-nav">Get Wander</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Menu">☰</button>
+    </div>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="tagline">Introducing Wander</div>
+  <h1>Travel planning.<br>Reimagined.</h1>
+  <p class="sub">One app to dream it, plan it, and live it — flights, stays, and every moment in between, beautifully organized.</p>
+  <div class="btn-row">
+    <a href="#pricing" class="btn btn-primary">Get Wander — It's Free</a>
+    <a href="#features" class="btn btn-secondary">See how it works ›</a>
+  </div>
+
+  <div class="hero-visual fade-in">
+    <div class="glass-card">
+      <div class="pin"><span class="pin-dot"></span> Current trip · Day 3 of 9</div>
+      <div class="route">Tokyo <span class="arrow">→</span> Kyoto</div>
+      <div class="meta">
+        <div><b>2h 20m</b> by rail</div>
+        <div><b>4</b> reservations synced</div>
+        <div><b>12°C</b> in Kyoto</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <h2 class="section-title">Everything clicks into place.</h2>
+  <p class="sub">Three simple ideas make every trip effortless.</p>
+  <div class="feature-grid">
+    <div class="feature-card fade-in">
+      <div class="feature-icon">✦</div>
+      <h3>Smart Itineraries</h3>
+      <p>Wander reads your bookings and quietly assembles a single, living itinerary — no copy-pasting confirmation emails, ever.</p>
+    </div>
+    <div class="feature-card fade-in">
+      <div class="feature-icon">⟲</div>
+      <h3>Real‑Time Sync</h3>
+      <p>Flight delayed? Gate changed? Your plan updates itself instantly, and everyone in your group sees the change the moment it happens.</p>
+    </div>
+    <div class="feature-card fade-in">
+      <div class="feature-icon">⬡</div>
+      <h3>Offline Everything</h3>
+      <p>Maps, tickets, and notes are all available with zero signal — because the best views are usually where the bars disappear.</p>
+    </div>
+  </div>
+</section>
+
+<section class="destinations" id="destinations">
+  <h2 class="section-title">Where to next.</h2>
+  <p class="sub">Hand-picked inspiration, ready to drop straight into your plan.</p>
+  <div class="dest-scroll">
+    <div class="dest-card dest-1"><h4>Santorini</h4><span>Greece</span></div>
+    <div class="dest-card dest-2"><h4>Reykjavík</h4><span>Iceland</span></div>
+    <div class="dest-card dest-3"><h4>Kyoto</h4><span>Japan</span></div>
+    <div class="dest-card dest-4"><h4>Marrakech</h4><span>Morocco</span></div>
+    <div class="dest-card dest-5"><h4>Patagonia</h4><span>Argentina · Chile</span></div>
+  </div>
+</section>
+
+<section class="pricing" id="pricing">
+  <h2 class="section-title">Choose your Wander.</h2>
+  <p class="sub">Start for free. Upgrade whenever your travels ask for more.</p>
+  <div class="price-grid">
+    <div class="price-card fade-in">
+      <h3>Explorer</h3>
+      <div class="price-amount">$0<span> /month</span></div>
+      <ul>
+        <li>Unlimited itineraries</li>
+        <li>Basic trip sync</li>
+        <li>Offline maps for 1 trip</li>
+        <li>Community trip guides</li>
+      </ul>
+      <a href="#" class="btn btn-secondary">Get Started</a>
+    </div>
+    <div class="price-card highlight fade-in">
+      <div class="price-badge">MOST POPULAR</div>
+      <h3>Voyager</h3>
+      <div class="price-amount">$6<span> /month</span></div>
+      <ul>
+        <li>Everything in Explorer</li>
+        <li>Real-time flight & gate alerts</li>
+        <li>Unlimited offline maps</li>
+        <li>Group trip collaboration</li>
+        <li>Priority support</li>
+      </ul>
+      <a href="#" class="btn btn-primary">Get Started</a>
+    </div>
+    <div class="price-card fade-in">
+      <h3>Globetrotter</h3>
+      <div class="price-amount">$12<span> /month</span></div>
+      <ul>
+        <li>Everything in Voyager</li>
+        <li>Concierge itinerary builder</li>
+        <li>Family sharing, up to 6 people</li>
+        <li>Annual travel insights</li>
+      </ul>
+      <a href="#" class="btn btn-secondary">Get Started</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <div class="footer-links">
+      <div>
+        <h5>Wander</h5>
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#destinations">Destinations</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Company</h5>
+        <ul>
+          <li><a href="#">About</a></li>
+          <li><a href="#">Careers</a></li>
+          <li><a href="#">Newsroom</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Support</h5>
+        <ul>
+          <li><a href="#">Help Center</a></li>
+          <li><a href="#">Contact Us</a></li>
+          <li><a href="#">Privacy</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal</h5>
+        <ul>
+          <li><a href="#">Terms of Service</a></li>
+          <li><a href="#">Privacy Policy</a></li>
+          <li><a href="#">Cookies</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>Copyright © 2026 Wander Inc. All rights reserved.</div>
+      <div>Designed for wanderers, everywhere.</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var header = document.getElementById('site-header');
+    window.addEventListener('scroll', function(){
+      if(window.scrollY > 8){
+        header.style.background = 'rgba(10,10,12,0.9)';
+      } else {
+        header.style.background = 'rgba(10,10,12,0.72)';
+      }
+    });
+
+    var toggle = document.getElementById('navToggle');
+    var links = document.querySelector('.nav-links');
+    toggle.addEventListener('click', function(){
+      var open = links.style.display === 'flex';
+      links.style.display = open ? 'none' : 'flex';
+      links.style.position = 'absolute';
+      links.style.top = '52px';
+      links.style.left = '0';
+      links.style.right = '0';
+      links.style.flexDirection = 'column';
+      links.style.background = 'rgba(10,10,12,0.96)';
+      links.style.padding = '20px';
+      links.style.gap = '18px';
+      links.style.textAlign = 'center';
+    });
+
+    var els = document.querySelectorAll('.fade-in');
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          e.target.classList.add('visible');
+          obs.unobserve(e.target);
+        }
+      });
+    }, {threshold:0.15});
+    els.forEach(function(el){ obs.observe(el); });
+
+    document.querySelectorAll('a[href^="#"]').forEach(function(a){
+      a.addEventListener('click', function(ev){
+        var id = a.getAttribute('href').slice(1);
+        var target = document.getElementById(id);
+        if(target){
+          ev.preventDefault();
+          target.scrollIntoView({behavior:'smooth'});
+        }
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

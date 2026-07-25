@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wander — Travel planning that plans itself.</title>
+<style>
+  :root{
+    --ink:#1d1d1f;
+    --ink-2:#6e6e73;
+    --bg:#ffffff;
+    --band:#f5f5f7;
+    --accent:#0066cc;
+    --accent-dark:#004999;
+    --hairline:rgba(0,0,0,.1);
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;
+    --r-card:20px; --r-panel:28px; --r-pill:980px;
+    --shadow:0 4px 24px rgba(0,0,0,.08);
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font:400 17px/1.47 var(--font);
+    color:var(--ink);
+    background:var(--bg);
+    -webkit-font-smoothing:antialiased;
+  }
+  img,svg{display:block;max-width:100%;}
+  a{color:inherit;}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 24px;}
+
+  /* ---------- Reveal-on-scroll ---------- */
+  .reveal{opacity:0;transform:translateY(20px);transition:opacity .6s ease-out, transform .6s ease-out;}
+  .reveal.in{opacity:1;transform:translateY(0);}
+  .reveal.d1{transition-delay:.08s;}
+  .reveal.d2{transition-delay:.16s;}
+  .reveal.d3{transition-delay:.24s;}
+  .reveal.d4{transition-delay:.32s;}
+  .reveal.d5{transition-delay:.4s;}
+  @media (prefers-reduced-motion: reduce){
+    .reveal{opacity:1;transform:none;transition:none;}
+    html{scroll-behavior:auto;}
+  }
+
+  /* ---------- Nav ---------- */
+  .nav{
+    position:sticky;top:0;z-index:100;
+    height:52px;
+    display:flex;align-items:center;
+    background:rgba(255,255,255,.72);
+    backdrop-filter:saturate(180%) blur(20px);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--hairline);
+  }
+  .nav .wrap{width:100%;display:flex;align-items:center;justify-content:space-between;}
+  .nav-logo{display:flex;align-items:center;gap:8px;font-weight:600;font-size:16px;letter-spacing:-0.01em;text-decoration:none;color:var(--ink);}
+  .nav-logo .mark{width:20px;height:20px;flex:0 0 auto;}
+  .nav-links{display:flex;gap:28px;list-style:none;margin:0;padding:0;}
+  .nav-links a{font-size:13px;color:var(--ink);text-decoration:none;opacity:.85;transition:opacity .15s ease;}
+  .nav-links a:hover{opacity:1;}
+  .nav-cta{display:flex;align-items:center;gap:16px;}
+  .nav .btn{padding:7px 16px;font-size:13px;}
+  .nav-toggle{display:none;background:none;border:0;padding:6px;cursor:pointer;}
+  .nav-toggle span{display:block;width:20px;height:2px;background:var(--ink);margin:4px 0;border-radius:2px;}
+
+  @media (max-width:820px){
+    .nav-links{display:none;}
+    .nav-toggle{display:block;}
+  }
+
+  /* ---------- Buttons & links ---------- */
+  .btn{
+    display:inline-block;
+    font:600 17px/1 var(--font);
+    border-radius:var(--r-pill);
+    padding:13px 24px;
+    background:var(--accent);
+    color:#fff;
+    border:0;
+    cursor:pointer;
+    text-decoration:none;
+    transition:transform .1s ease-out, background .2s ease;
+    white-space:nowrap;
+  }
+  .btn:hover{background:var(--accent-dark);}
+  .btn:active{transform:scale(.96);}
+  .btn-ghost{
+    background:rgba(0,0,0,.06);
+    color:var(--ink);
+  }
+  .btn-ghost:hover{background:rgba(0,0,0,.1);}
+
+  .link-arrow{
+    color:var(--accent);
+    font-size:17px;
+    font-weight:400;
+    text-decoration:none;
+    display:inline-flex;
+    align-items:center;
+    gap:2px;
+  }
+  .link-arrow:hover{text-decoration:underline;}
+  .link-arrow::after{content:"›";font-size:19px;line-height:1;transition:transform .15s ease;}
+  .link-arrow:hover::after{transform:translateX(2px);}
+
+  .cta-row{display:flex;align-items:center;gap:24px;flex-wrap:wrap;}
+
+  /* ---------- Eyebrow / headings ---------- */
+  .eyebrow{
+    display:block;
+    font-size:14px;font-weight:600;color:var(--accent);
+    letter-spacing:0;margin-bottom:14px;
+  }
+  h1,h2,h3{margin:0;font-weight:600;letter-spacing:-0.03em;}
+  .h1{font-size:clamp(40px,6vw,80px);line-height:1.05;}
+  .h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-0.02em;}
+  .h3{font-size:22px;line-height:1.2;letter-spacing:-0.01em;}
+  .sub{color:var(--ink-2);font-size:clamp(17px,2vw,21px);line-height:1.5;font-weight:400;}
+  .section-head{max-width:680px;margin:0 auto 56px;text-align:center;}
+
+  section{padding:100px 0;}
+  .band{background:var(--band);}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:96px 0 0;text-align:center;overflow:hidden;}
+  .hero .wrap{display:flex;flex-direction:column;align-items:center;}
+  .hero .h1{max-width:900px;}
+  .hero .sub{max-width:600px;margin:22px auto 34px;}
+  .hero .cta-row{justify-content:center;margin-bottom:64px;}
+
+  .hero-panel{
+    width:100%;
+    max-width:1040px;
+    aspect-ratio:16/9.2;
+    border-radius:var(--r-panel);
+    background:
+      radial-gradient(120% 140% at 15% 0%, #6fc3ff 0%, transparent 55%),
+      radial-gradient(110% 120% at 90% 15%, #ff9d5c 0%, transparent 50%),
+      radial-gradient(140% 140% at 85% 100%, #ffd36e 0%, transparent 55%),
+      linear-gradient(135deg,#0a3d91 0%, #1c6fd9 45%, #37a6e8 100%);
+    box-shadow:0 30px 70px rgba(10,50,110,.28);
+    position:relative;
+    margin:0 auto;
+    overflow:hidden;
+  }
+  .hero-panel::before{
+    content:"";
+    position:absolute;inset:0;
+    background:
+      radial-gradient(2px 2px at 20% 30%, rgba(255,255,255,.9) 0, transparent 100%),
+      radial-gradient(2px 2px at 70% 60%, rgba(255,255,255,.7) 0, transparent 100%),
+      radial-gradient(2px 2px at 40% 80%, rgba(255,255,255,.6) 0, transparent 100%),
+      radial-gradient(2px 2px at 85% 20%, rgba(255,255,255,.8) 0, transparent 100%),
+      radial-gradient(2px 2px at 55% 15%, rgba(255,255,255,.6) 0, transparent 100%);
+    opacity:.8;
+  }
+  .hero-route{
+    position:absolute;inset:0;
+  }
+  .hero-card{
+    position:absolute;
+    background:rgba(255,255,255,.92);
+    backdrop-filter:blur(6px);
+    border-radius:16px;
+    box-shadow:0 12px 30px rgba(0,20,60,.22);
+    padding:14px 18px;
+    text-align:left;
+    font-size:13px;
+    color:var(--ink);
+  }
+  .hero-card strong{display:block;font-size:15px;font-weight:600;margin-bottom:2px;}
+  .hero-card small{color:var(--ink-2);font-size:12px;}
+  .hero-card.c1{top:12%;left:6%;}
+  .hero-card.c2{bottom:14%;right:7%;}
+  .hero-card.c3{top:44%;left:42%;transform:translate(-50%,-50%);padding:10px 16px;}
+  @media (max-width:700px){
+    .hero-card{display:none;}
+  }
+
+  /* ---------- Features ---------- */
+  .cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;}
+  @media (max-width:900px){.cards3{grid-template-columns:1fr;}}
+  .card{
+    background:#fff;
+    border-radius:var(--r-card);
+    box-shadow:var(--shadow);
+    padding:36px 32px;
+  }
+  .band .card{background:#fff;}
+  .icon-chip{
+    width:52px;height:52px;border-radius:14px;
+    display:flex;align-items:center;justify-content:center;
+    margin-bottom:22px;
+    font-size:24px;
+  }
+  .icon-chip.blue{background:#e8f1fd;color:#0066cc;}
+  .icon-chip.green{background:#e6f8ee;color:#1a9550;}
+  .icon-chip.orange{background:#fff2e2;color:#c9720b;}
+  .card h3{margin-bottom:10px;}
+  .card p{color:var(--ink-2);margin:0;font-size:16px;line-height:1.55;}
+
+  /* ---------- Destinations ---------- */
+  .dest-row{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:18px;
+  }
+  @media (max-width:980px){.dest-row{grid-template-columns:repeat(3,1fr);}}
+  @media (max-width:640px){.dest-row{grid-template-columns:repeat(2,1fr);}}
+  .dest-card{
+    position:relative;
+    border-radius:18px;
+    aspect-ratio:3/4;
+    overflow:hidden;
+    box-shadow:var(--shadow);
+    display:flex;align-items:flex-end;
+    transition:transform .25s ease-out;
+  }
+  .dest-card:hover{transform:translateY(-6px);}
+  .dest-card .tint{position:absolute;inset:0;}
+  .dest-card .fade{position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%, rgba(0,0,0,.62) 100%);}
+  .dest-card .label{position:relative;padding:16px;color:#fff;}
+  .dest-card .label strong{display:block;font-size:16px;font-weight:600;letter-spacing:-0.01em;}
+  .dest-card .label span{font-size:12px;opacity:.85;}
+
+  .t1{background:linear-gradient(160deg,#ff8a7a,#ff5f6d 45%,#a3336b);}
+  .t2{background:linear-gradient(160deg,#ffd97a,#ff9d5c 45%,#d1495b);}
+  .t3{background:linear-gradient(160deg,#8fd3ff,#4facfe 45%,#0a4a8c);}
+  .t4{background:linear-gradient(160deg,#ffc57a,#f6905b 45%,#8c3a2b);}
+  .t5{background:linear-gradient(160deg,#9be3c2,#38c39d 45%,#0c5c4a);}
+
+  /* ---------- Pricing ---------- */
+  .price-row{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;align-items:stretch;}
+  @media (max-width:900px){.price-row{grid-template-columns:1fr;}}
+  .plan{
+    background:#fff;
+    border-radius:var(--r-card);
+    box-shadow:var(--shadow);
+    padding:36px 32px;
+    display:flex;flex-direction:column;
+    border:1px solid var(--hairline);
+    position:relative;
+  }
+  .plan.featured{
+    border:2px solid var(--accent);
+    transform:scale(1.03);
+  }
+  .plan-badge{
+    position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+    background:var(--accent);color:#fff;font-size:12px;font-weight:600;
+    padding:5px 14px;border-radius:var(--r-pill);white-space:nowrap;
+  }
+  .plan-name{font-size:20px;font-weight:600;margin-bottom:6px;}
+  .plan-price{font-size:38px;font-weight:600;letter-spacing:-0.02em;margin:10px 0 2px;}
+  .plan-price span{font-size:15px;font-weight:400;color:var(--ink-2);}
+  .plan-desc{color:var(--ink-2);font-size:15px;margin-bottom:24px;}
+  .plan-list{list-style:none;margin:0 0 28px;padding:0;flex:1;}
+  .plan-list li{
+    font-size:15px;color:var(--ink);padding:9px 0;
+    border-top:1px solid var(--hairline);
+    display:flex;gap:10px;
+  }
+  .plan-list li:first-child{border-top:0;}
+  .plan-list li::before{content:"✓";color:var(--accent);font-weight:600;}
+  .plan .btn{width:100%;text-align:center;}
+
+  /* ---------- Footer ---------- */
+  footer{background:var(--band);border-top:1px solid var(--hairline);padding:56px 0 28px;}
+  .foot-cols{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:32px;
+    padding-bottom:32px;border-bottom:1px solid var(--hairline);
+    margin-bottom:24px;
+  }
+  @media (max-width:700px){.foot-cols{grid-template-columns:repeat(2,1fr);}}
+  .foot-col h4{font-size:13px;font-weight:600;margin:0 0 14px;color:var(--ink);}
+  .foot-col ul{list-style:none;margin:0;padding:0;}
+  .foot-col li{margin-bottom:10px;}
+  .foot-col a{font-size:13px;color:var(--ink-2);text-decoration:none;}
+  .foot-col a:hover{text-decoration:underline;color:var(--ink);}
+  .foot-bottom{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink-2);}
+  .foot-bottom nav{display:flex;gap:18px;flex-wrap:wrap;}
+  .foot-bottom a{color:var(--ink-2);text-decoration:none;}
+  .foot-bottom a:hover{text-decoration:underline;}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="nav-logo" href="#top">
+      <svg class="mark" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 2C7 2 4 6 4 10.5C4 16.5 12 22 12 22C12 22 20 16.5 20 10.5C20 6 17 2 12 2Z" fill="#0066cc"/>
+        <circle cx="12" cy="10.3" r="3.1" fill="#fff"/>
+      </svg>
+      Wander
+    </a>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#destinations">Destinations</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+      <li><a href="#faq">Support</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a class="btn" href="#pricing">Get Wander</a>
+    </div>
+    <button class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow reveal in">Wander</span>
+      <h1 class="h1 reveal in">Plan the trip<br>that plans itself.</h1>
+      <p class="sub reveal in d1">Tell Wander where you're dreaming of. It builds the itinerary, finds the flights worth taking, and keeps everyone in your group on the same page — automatically.</p>
+      <div class="cta-row reveal in d2">
+        <a class="btn" href="#pricing">Get Wander — it's free</a>
+        <a class="link-arrow" href="#features">See how it works</a>
+      </div>
+      <div class="hero-panel reveal in d3">
+        <div class="hero-route"></div>
+        <div class="hero-card c1"><strong>Day 3 · Kyoto</strong><small>Fushimi Inari at sunrise</small></div>
+        <div class="hero-card c3"><strong>4 travelers synced</strong><small>Itinerary updated live</small></div>
+        <div class="hero-card c2"><strong>Flight found</strong><small>$412 · nonstop · Tue 7:40a</small></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Features</span>
+        <h2 class="h2">Everything for the trip.<br>Nothing for the busywork.</h2>
+      </div>
+      <div class="cards3">
+        <div class="card reveal d1">
+          <div class="icon-chip blue">🧭</div>
+          <h3>Smart Itineraries</h3>
+          <p>Describe your trip in a sentence. Wander lays out a day-by-day plan — paced right, geographically sane, and easy to rearrange with a drag.</p>
+        </div>
+        <div class="card reveal d2">
+          <div class="icon-chip green">👥</div>
+          <h3>Live Collaboration</h3>
+          <p>Everyone in the group sees the same itinerary, updated in real time. Vote on restaurants, split costs, and settle up without leaving the app.</p>
+        </div>
+        <div class="card reveal d3">
+          <div class="icon-chip orange">📍</div>
+          <h3>Offline Maps &amp; Passes</h3>
+          <p>Download your whole trip before you land. Maps, tickets, and reservations all work in airplane mode, no signal required.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DESTINATIONS -->
+  <section id="destinations" class="band">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Destinations</span>
+        <h2 class="h2">Wherever you're headed,<br>Wander's already been there.</h2>
+      </div>
+      <div class="dest-row">
+        <div class="dest-card reveal d1">
+          <div class="tint t1"></div><div class="fade"></div>
+          <div class="label"><strong>Kyoto</strong><span>Japan</span></div>
+        </div>
+        <div class="dest-card reveal d2">
+          <div class="tint t2"></div><div class="fade"></div>
+          <div class="label"><strong>Lisbon</strong><span>Portugal</span></div>
+        </div>
+        <div class="dest-card reveal d3">
+          <div class="tint t3"></div><div class="fade"></div>
+          <div class="label"><strong>Reykjavik</strong><span>Iceland</span></div>
+        </div>
+        <div class="dest-card reveal d4">
+          <div class="tint t4"></div><div class="fade"></div>
+          <div class="label"><strong>Marrakech</strong><span>Morocco</span></div>
+        </div>
+        <div class="dest-card reveal d5">
+          <div class="tint t5"></div><div class="fade"></div>
+          <div class="label"><strong>Queenstown</strong><span>New Zealand</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section id="pricing">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Pricing</span>
+        <h2 class="h2">Start free.<br>Upgrade when it's worth it.</h2>
+      </div>
+      <div class="price-row">
+        <div class="plan reveal d1">
+          <div class="plan-name">Explorer</div>
+          <div class="plan-price">$0<span> /forever</span></div>
+          <p class="plan-desc">For the occasional trip.</p>
+          <ul class="plan-list">
+            <li>1 active trip</li>
+            <li>Smart itinerary builder</li>
+            <li>Up to 2 collaborators</li>
+            <li>Standard maps</li>
+          </ul>
+          <a class="btn btn-ghost" href="#">Get started</a>
+        </div>
+        <div class="plan featured reveal d2">
+          <span class="plan-badge">Most popular</span>
+          <div class="plan-name">Wanderer</div>
+          <div class="plan-price">$6<span> /month</span></div>
+          <p class="plan-desc">For people who travel often.</p>
+          <ul class="plan-list">
+            <li>Unlimited trips</li>
+            <li>Unlimited collaborators</li>
+            <li>Offline maps &amp; passes</li>
+            <li>Live price tracking</li>
+            <li>Priority support</li>
+          </ul>
+          <a class="btn" href="#">Start free trial</a>
+        </div>
+        <div class="plan reveal d3">
+          <div class="plan-name">Voyager</div>
+          <div class="plan-price">$54<span> /year</span></div>
+          <p class="plan-desc">For families and frequent groups.</p>
+          <ul class="plan-list">
+            <li>Everything in Wanderer</li>
+            <li>Shared family itineraries</li>
+            <li>Group expense splitting</li>
+            <li>Up to 6 accounts</li>
+          </ul>
+          <a class="btn btn-ghost" href="#">Choose Voyager</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer id="faq">
+  <div class="wrap">
+    <div class="foot-cols">
+      <div class="foot-col">
+        <h4>Wander</h4>
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#destinations">Destinations</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#top">What's new</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Support</h4>
+        <ul>
+          <li><a href="#">Help center</a></li>
+          <li><a href="#">Contact us</a></li>
+          <li><a href="#">Trip status</a></li>
+          <li><a href="#">Community</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="#">About Wander</a></li>
+          <li><a href="#">Careers</a></li>
+          <li><a href="#">Newsroom</a></li>
+          <li><a href="#">Sustainability</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="#">Privacy policy</a></li>
+          <li><a href="#">Terms of use</a></li>
+          <li><a href="#">Cookies</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>Copyright © 2026 Wander Inc. All rights reserved.</span>
+      <nav>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Use</a>
+        <a href="#">Sales and Refunds</a>
+        <a href="#">Legal</a>
+        <a href="#">Site Map</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var supportsIO = 'IntersectionObserver' in window;
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var targets = document.querySelectorAll('.reveal:not(.in)');
+
+  if (!supportsIO || reduced) {
+    targets.forEach(function(el){ el.classList.add('in'); });
+    return;
+  }
+
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+
+  targets.forEach(function(el){ io.observe(el); });
+
+  // Mobile nav toggle: reveal the link list as a simple dropdown.
+  var toggle = document.querySelector('.nav-toggle');
+  var links = document.querySelector('.nav-links');
+  if (toggle && links) {
+    toggle.addEventListener('click', function(){
+      var open = links.style.display === 'flex';
+      links.style.cssText = open
+        ? ''
+        : 'display:flex;position:absolute;top:52px;left:0;right:0;background:rgba(255,255,255,.96);backdrop-filter:blur(20px);flex-direction:column;padding:16px 24px;gap:16px;border-bottom:1px solid rgba(0,0,0,.1);';
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

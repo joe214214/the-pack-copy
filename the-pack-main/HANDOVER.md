@@ -1956,3 +1956,27 @@ the skill deliver it more authentically?" — since both runs attempt it.
 ### which pairs must NOT be presented as skill A/Bs.
 
 ### Services stopped.
+
+## 2026-07-22 (later 2) — Demo deck, script, runbook + enhanced apple-design skill
+
+Presentation-day materials, all in demo-assets/:
+- presentation.html — self-contained scrollytelling deck (dark control-room look,
+  violet=agent / cyan=skill colour coding, hand-drawn flow diagrams, the 5-step
+  workflow loop). Double-click → F11.
+- speech.md — casual ~8–9 min talk script, aligned section-by-section with the deck.
+- RUNBOOK.md — exact startup flow (start-dev.bat + start.bat), the 30-sec verify
+  (the "click Alex button" LAN-hydration check), demo steps, and every gotcha.
+- apple-design_SKILL_enhanced.md — ARCHIVE COPY of the improved skill (the live
+  skill lives in the user's Claude Desktop path, outside this repo, so it's copied
+  here to preserve it). Added section 18 "The Apple web look" — concrete visual
+  tokens (light canvas #fbfbfd, band #f5f5f7, pill+chevron CTA, frosted nav,
+  weight-600 type, the six signature "tells") because the skill was ~all motion and
+  little static-visual guidance, which is why earlier landing-page A/Bs were subtle.
+- _compare/1_NO-skill, 2_OLD-skill, 3_NEW-skill — the three landing pages showing
+  the skill enhancement's effect (sonnet).
+
+Key finding this session: switching the agent model to sonnet (via CLAUDE_MODEL) +
+the enhanced skill makes the with/without-skill difference clearly visible; on opus
+the skill added little because the base model already designs well.
+
+Nothing else changed in the app code. Committed to feature/ui-html-delivery-preview.
