@@ -183,20 +183,30 @@ export async function POST(
       }
     });
 
-    // Create Review record
-    await tx.review.create({
-      data: {
+    // Upsert Review record (create on first submit, update on re-submit after revision)
+    await tx.review.upsert({
+      where: { orderId: execution.orderId },
+      create: {
         orderId: execution.orderId,
         autoPassed: reviewResult.passed,
         autoScore: reviewResult.score,
-        autoChecks: reviewResult.checks as any
-      }
+        autoChecks: reviewResult.checks as any,
+      },
+      update: {
+        autoPassed: reviewResult.passed,
+        autoScore: reviewResult.score,
+        autoChecks: reviewResult.checks as any,
+        userAccepted: null,  // reset previous user decision
+        userRating: null,
+        userComment: null,
+        updatedAt: new Date(),
+      },
     });
 
-    // Update Order status
+    // Update Order status back to REVIEW
     await tx.order.update({
       where: { id: execution.orderId },
-      data: { status: "REVIEW" }
+      data: { status: "REVIEW" },
     });
   });
 

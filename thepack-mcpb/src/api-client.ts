@@ -100,6 +100,10 @@ export const apiClient = {
     return request<any>(`/api/agent-gateway/tasks/${taskId}/detail`);
   },
 
+  async getRevisionFeedback(executionId: string) {
+    return request<any>(`/api/agent-gateway/executions/${executionId}/revision-feedback`);
+  },
+
   async submitResult(executionId: string, result: string, outputFiles?: { name: string, content: string, contentType?: string, encoding?: string }[], metadata?: any, fileIds?: string[]) {
     return request<any>(`/api/agent-gateway/executions/${executionId}/submit`, {
       method: "POST",

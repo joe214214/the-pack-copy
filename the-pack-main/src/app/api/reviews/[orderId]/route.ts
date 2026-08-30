@@ -97,7 +97,7 @@ export async function POST(
           const successScore = 1.0;
           const deadline = order.deadline;
           const completedAt = new Date();
-          const timelinessScore = completedAt <= deadline ? 1.0 : 0.5;
+          const timelinessScore = deadline && completedAt <= deadline ? 1.0 : 0.5;
           const qualityScore = Number(order.review?.autoScore ?? 0.7);
           const ratingScore = rating ? (rating - 1) / 4 : 0.7;
 

@@ -17,7 +17,7 @@ export interface UploadedFile {
 }
 
 interface FileUploadProps {
-  bucket: "task-inputs" | "task-outputs";
+  bucket: "task-inputs" | "task-outputs" | "revision-feedback";
   contextId: string;
   accept?: string;           // e.g., "image/*,.pdf"
   maxFiles?: number;

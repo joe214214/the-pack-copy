@@ -13,7 +13,7 @@ import crypto from "crypto";
 
 const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), "uploads");
 
-export type StorageBucket = "task-inputs" | "task-outputs" | "avatars";
+export type StorageBucket = "task-inputs" | "task-outputs" | "avatars" | "revision-feedback";
 
 export interface UploadResult {
   key: string;
@@ -34,12 +34,17 @@ const ALLOWED_TYPES: Record<StorageBucket, string[]> = {
     "application/json", "application/octet-stream",
   ],
   "avatars": ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  "revision-feedback": [
+    "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
+    "application/pdf", "text/plain", "text/markdown", "text/csv", "application/json",
+  ],
 };
 
 const MAX_FILE_SIZE: Record<StorageBucket, number> = {
   "task-inputs": 10 * 1024 * 1024,
   "task-outputs": 20 * 1024 * 1024,
   "avatars": 2 * 1024 * 1024,
+  "revision-feedback": 10 * 1024 * 1024,
 };
 
 export class StorageError extends Error {

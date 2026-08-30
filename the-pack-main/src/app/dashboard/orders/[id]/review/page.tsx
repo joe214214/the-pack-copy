@@ -11,9 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft, CheckCheck, XCircle, Star, FileText, Bot,
   Loader2, ShieldCheck, AlertTriangle, CheckCircle2, Clock,
-  Download, Eye, Zap, ImageIcon,
+  Download, Eye, Zap, ImageIcon, RotateCcw, History
 } from "lucide-react";
 import { toast } from "sonner";
+import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -141,7 +142,7 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
 // ─── Main Review Page ────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type OrderDetail = any;
+type OrderDetail = any; // Note: We expect this to include currentRound, extraRevisions, revisions array, and task.maxRevisions
 
 export default function ReviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -152,6 +153,11 @@ export default function ReviewPage() {
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const [showRevisionForm, setShowRevisionForm] = useState(false);
+  const [revisionFeedback, setRevisionFeedback] = useState("");
+  const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
+  const [submittingRevision, setSubmittingRevision] = useState(false);
 
   useEffect(() => {
     const fetch_ = async () => {
@@ -185,6 +191,32 @@ export default function ReviewPage() {
       toast.error(err instanceof Error ? err.message : "Submission failed");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleRevisionRequest = async () => {
+    if (revisionFeedback.length < 10) {
+      toast.error("Please provide at least 10 characters of feedback.");
+      return;
+    }
+    setSubmittingRevision(true);
+    try {
+      const res = await fetch(`/api/reviews/${id}/revision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: revisionFeedback,
+          fileIds: revisionFiles.map(f => f.id)
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to request revision");
+      toast.success("Revision requested. The agent will redo the work.");
+      router.push(`/dashboard/orders/${id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Submission failed");
+    } finally {
+      setSubmittingRevision(false);
     }
   };
 
@@ -228,6 +260,11 @@ export default function ReviewPage() {
   const deadline = new Date(order.deadline);
   const isOnTime = execution?.completedAt ? new Date(execution.completedAt) <= deadline : true;
 
+  const currentRound = order.currentRound || 1;
+  const maxAttempts = (order.task?.maxRevisions || 0) + (order.extraRevisions || 0) + 1;
+  const revisionsRemaining = Math.max(0, maxAttempts - currentRound);
+  const canRequestRevision = currentRound <= (order.task?.maxRevisions || 0) + (order.extraRevisions || 0);
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <Button render={<Link href={`/dashboard/orders/${id}`} />} variant="ghost" size="sm">
@@ -251,6 +288,10 @@ export default function ReviewPage() {
               <Clock className="h-3 w-3" /> Late delivery
             </Badge>
           )}
+          <Badge variant="secondary" className="gap-1 bg-zinc-800 text-zinc-300 border-zinc-700 ml-2">
+            <RotateCcw className="h-3 w-3" />
+            Round {currentRound} of {maxAttempts} ({revisionsRemaining} revisions remaining)
+          </Badge>
         </div>
         <h1 className="text-2xl font-bold">{order.task?.title}</h1>
         <p className="text-muted-foreground text-sm mt-1">
@@ -300,6 +341,44 @@ export default function ReviewPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Previous Revisions */}
+          {currentRound > 1 && order.revisions && order.revisions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <History className="h-4 w-4 text-primary" />
+                  Previous Revisions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {order.revisions.map((rev: any, index: number) => (
+                  <div key={index} className="border border-border/50 rounded-lg p-4 bg-muted/20 space-y-3">
+                    <div className="flex justify-between items-start">
+                      <Badge variant="outline">Round {rev.round}</Badge>
+                      <span className="text-xs text-muted-foreground">{new Date(rev.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Feedback</p>
+                      <p className="text-sm text-foreground/90 whitespace-pre-wrap">{rev.feedback}</p>
+                    </div>
+                    {rev.autoScore !== undefined && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                        <span>Auto-review score:</span>
+                        <strong className={cn(
+                          rev.autoScore >= 0.8 ? "text-emerald-400" :
+                          rev.autoScore >= 0.6 ? "text-amber-400" : "text-rose-400"
+                        )}>
+                          {(rev.autoScore * 100).toFixed(0)}%
+                        </strong>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right — auto-review + rating */}
@@ -418,27 +497,82 @@ export default function ReviewPage() {
               </div>
 
               <div className="flex flex-col gap-2 pt-2">
-                <Button
-                  className="w-full glow"
-                  onClick={() => handleSubmit(true)}
-                  disabled={submitting || rating === 0}
-                >
-                  {submitting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCheck className="mr-2 h-4 w-4" />
-                  )}
-                  Accept & Pay Agent · ${n(order.price) - (n(order.price) * 0.10)}/deliverable
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
-                  onClick={() => handleSubmit(false)}
-                  disabled={submitting}
-                >
-                  <XCircle className="mr-2 h-4 w-4" />
-                  Dispute — Request Refund
-                </Button>
+                {showRevisionForm ? (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2 border border-border/50 rounded-lg p-4 bg-muted/10">
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Revision Feedback <span className="text-rose-400">*</span></p>
+                      <Textarea
+                        placeholder="Tell the agent what to change... (min 10 chars)"
+                        value={revisionFeedback}
+                        onChange={e => setRevisionFeedback(e.target.value)}
+                        rows={4}
+                        className="resize-none text-sm"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium mb-2">Reference Files (optional)</p>
+                      <FileUpload
+                        bucket="revision-feedback"
+                        contextId={id}
+                        accept="image/*,application/pdf,text/*"
+                        maxFiles={5}
+                        onFilesChange={setRevisionFiles}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-amber-950"
+                        onClick={handleRevisionRequest}
+                        disabled={submittingRevision}
+                      >
+                        {submittingRevision ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RotateCcw className="h-4 w-4 mr-2" />}
+                        Submit Revision Request
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setShowRevisionForm(false)}
+                        disabled={submittingRevision}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <Button
+                      className="w-full glow"
+                      onClick={() => handleSubmit(true)}
+                      disabled={submitting || rating === 0}
+                    >
+                      {submitting ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCheck className="mr-2 h-4 w-4" />
+                      )}
+                      Accept & Pay Agent · ${n(order.price) - (n(order.price) * 0.10)}/deliverable
+                    </Button>
+                    {canRequestRevision && (
+                      <Button
+                        variant="outline"
+                        className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                        onClick={() => setShowRevisionForm(true)}
+                        disabled={submitting}
+                      >
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Request Revision
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      className="w-full border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
+                      onClick={() => handleSubmit(false)}
+                      disabled={submitting}
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Dispute — Request Refund
+                    </Button>
+                  </>
+                )}
               </div>
 
               <p className="text-xs text-muted-foreground text-center">

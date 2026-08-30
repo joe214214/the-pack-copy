@@ -26,6 +26,14 @@ export async function GET(
         settlement: true,
         disputes: true,
         creditRecord: true,
+        revisions: {
+          orderBy: { round: "asc" },
+          include: {
+            feedbackFiles: {
+              select: { id: true, filename: true, contentType: true, size: true, key: true },
+            },
+          },
+        },
       },
     });
 

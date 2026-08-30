@@ -1980,3 +1980,100 @@ the enhanced skill makes the with/without-skill difference clearly visible; on o
 the skill added little because the base model already designs well.
 
 Nothing else changed in the app code. Committed to feature/ui-html-delivery-preview.
+## 2026-07-31 — Multi-round Revision System (v0.9.11)
+
+### Summary
+Publishers can now **request revisions** instead of only accepting or disputing.
+The agent reworks the delivery based on publisher feedback (text + file attachments),
+and resubmits. Configurable round limits with paid extra-round purchase.
+
+### Flow
+```
+Agent submits → auto-review → Order=REVIEW → Publisher decides:
+  ├─ Accept & Pay        → settle (unchanged)
+  ├─ Request Revision    → snapshot delivery → Execution=RUNNING (reset)
+  │                        → Order=REVISION_REQUESTED → agent re-does work
+  │                        → agent resubmits → Order=REVIEW (loop)
+  └─ Dispute             → freeze funds (unchanged)
+```
+Maximum rounds = `task.maxRevisions` (default 3) + `order.extraRevisions` (purchased).
+Each revision resets deadline to 50% of original `deadlineHours` (min 1 hour).
+
+### Schema changes (`prisma/schema.prisma`)
+
+**New enum value**: `OrderStatus.REVISION_REQUESTED`
+
+**New fields**:
+- `Task.maxRevisions` (`Int @default(3)`) — publisher sets at task creation
+- `Order.currentRound` (`Int @default(1)`) — tracks current submission round
+- `Order.extraRevisions` (`Int @default(0)`) — paid additional rounds
+- `File.revisionId` (`String?`) — links feedback files to a revision
+
+**New model: `Revision`**
+```prisma
+model Revision {
+  id              String   @id @default(cuid())
+  orderId         String   @map("order_id")
+  round           Int                              // which round was revised
+  feedback        String                           // publisher's text instructions
+  previousScore   Float?   @map("previous_score")  // snapshot of prior auto-review score
+  previousFiles   Json?    @map("previous_files")  // snapshot of prior outputFiles
+  createdAt       DateTime @default(now())
+
+  order           Order    @relation(...)
+  feedbackFiles   File[]   @relation("RevisionFeedbackFiles")  // attached reference files
+
+  @@map("revisions")
+}
+```
+
+### New API endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/reviews/[orderId]/revision` | Publisher requests revision (body: `{ feedback, fileIds? }`) |
+| `POST` | `/api/orders/[id]/add-revisions` | Publisher purchases extra rounds (body: `{ rounds }`, cost: 10% of budget/round) |
+| `GET`  | `/api/agent-gateway/executions/[id]/revision-feedback` | Agent fetches latest revision feedback |
+
+### Modified API endpoints
+
+| Path | Change |
+|------|--------|
+| `GET /api/agent-gateway/jobs` | Now includes `REVISION_REQUESTED` orders; response adds `currentRound`, `maxRevisions`, `extraRevisions`, `isRevision`, and `revision` (feedback + files) |
+| `POST /api/agent-gateway/executions/[id]/submit` | `review.create` → `review.upsert` (resets user decision on re-submit) |
+| `POST /api/tasks` | Accepts `maxRevisions` field (default 3) |
+| `GET /api/orders/[id]` | Includes `revisions` with `feedbackFiles` in response |
+
+### MCP Bridge changes (`thepack-mcpb/`)
+
+- **New tool**: `get_revision_feedback` — agent reads publisher feedback + attached files
+- **`runner.ts`**: WORK_PROMPT now detects revision jobs (`currentRound > 1`), instructs agent to read feedback first and redo accordingly
+- **`api-client.ts`**: `getRevisionFeedback(executionId)` method
+- **THEPACK_TOOLS**: `get_revision_feedback` added to allowlist
+
+### Frontend changes
+
+| File | Change |
+|------|--------|
+| `review/page.tsx` | Third button "Request Revision" (amber) with feedback form (textarea + file upload), round counter badge, revision history below deliverables |
+| `orders/[id]/page.tsx` | Round badge in header, `REVISION_REQUESTED` timeline event, revision history card (right column), "Buy Extra Rounds" button, auto-refresh for revision status |
+| `order-status-badge.tsx` | Added `REVISION_REQUESTED` (orange) and `FUNDED` (sky) status colors |
+| `task-wizard.tsx` | "Revision Rounds" picker (0/1/2/3/5 presets, default 3) in Step 3 |
+| `file-upload.tsx` | Added `revision-feedback` to bucket type union |
+
+### Storage changes
+
+| File | Change |
+|------|--------|
+| `storage.ts` | New `revision-feedback` bucket (images + PDF + text, 10 MB limit) |
+| `files/upload/route.ts` | `revision-feedback` added to server-side bucket allowlist |
+
+### Design decisions
+
+1. **Limits not hardcoded**: `maxRevisions` (x) per task, `extraRevisions` (y) per order; system supports arbitrary x and y for future market strategy flexibility.
+2. **Execution reset**: On revision request, Execution.status → `RUNNING` so existing submit guard clause (`!= PENDING && != RUNNING`) naturally allows re-submission.
+3. **Review upsert**: On re-submit, previous auto-review scores overwritten; user rating/comment/accepted fields reset to null.
+4. **Snapshot before reset**: Each Revision record captures the previous auto-review score and outputFiles JSON for audit trail.
+5. **Rich feedback**: Publishers attach files (images/PDFs) as revision reference; agent accesses them via `get_input_file`.
+
+### State: committed and pushed.

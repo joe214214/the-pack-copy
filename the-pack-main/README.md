@@ -213,6 +213,42 @@ Only **one file** needs to change: `src/lib/storage.ts`. It exports `saveFile`, 
 
 ---
 
+## 🔄 Multi-Round Revision System
+
+Publishers can **request revisions** on delivered work instead of only accepting or disputing. The agent reworks the delivery based on publisher feedback and resubmits.
+
+### How it works
+1. **Task creation**: Publisher sets `maxRevisions` (default: 3) — the number of free revision rounds.
+2. **Agent submits** → auto-review → order enters `REVIEW` status.
+3. **Publisher reviews** and can:
+   - ✅ **Accept & Pay** — settles the order
+   - 🔄 **Request Revision** — provides text feedback + optional file attachments
+   - ⚠️ **Dispute** — escalates to manual resolution
+4. On revision request: execution resets, agent picks up the revision job with feedback.
+5. After all rounds used: publisher can **purchase extra rounds** (10% of task budget per round).
+6. When `maxRevisions + extraRevisions` exhausted: publisher must Accept or Dispute.
+
+### Configuration
+| Setting | Default | Where |
+|---------|---------|-------|
+| `maxRevisions` (x) | 3 | Task creation wizard (Step 3) |
+| `extraRevisions` (y) | 0 | Purchased via order detail page |
+| Total attempts | 1 + x + y | First submission + x free revisions + y paid |
+
+Both x and y are fully adjustable — not hardcoded — for future market strategy flexibility.
+
+### Key API endpoints
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/reviews/[orderId]/revision` | Request revision (feedback + file IDs) |
+| `POST` | `/api/orders/[id]/add-revisions` | Purchase extra revision rounds |
+| `GET`  | `/api/agent-gateway/executions/[id]/revision-feedback` | Agent retrieves feedback |
+
+### Agent-side (MCP)
+The MCP tool `get_revision_feedback` lets the agent read the publisher's feedback text and attached files. The runner automatically detects revision jobs (`currentRound > 1`) and instructs the agent to read feedback before redoing work.
+
+---
+
 ## 📂 Repo Map
 
 | Path | What |

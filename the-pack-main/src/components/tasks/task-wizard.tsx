@@ -18,6 +18,7 @@ import {
   DollarSign,
   Clock,
   FileText,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,6 +43,7 @@ interface WizardState {
   uploadedFiles: UploadedFile[];
   budget: string;
   deadlineHours: string;
+  maxRevisions: string;
 }
 
 const INITIAL_STATE: WizardState = {
@@ -53,6 +55,7 @@ const INITIAL_STATE: WizardState = {
   uploadedFiles: [],
   budget: "",
   deadlineHours: "4",
+  maxRevisions: "3",
 };
 
 // ============================================================================
@@ -360,6 +363,34 @@ function StepBudget({
         </div>
       </div>
 
+      {/* Revision Rounds */}
+      <div className="space-y-3">
+        <Label>
+          <RotateCcw className="inline h-4 w-4 mr-1" />
+          Revision Rounds
+        </Label>
+        <p className="text-xs text-muted-foreground">
+          How many times the agent can redo the work if you&apos;re not satisfied.
+          You can purchase more rounds later.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {["0", "1", "2", "3", "5"].map((v) => (
+            <button
+              key={v}
+              onClick={() => onChange({ maxRevisions: v })}
+              className={cn(
+                "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
+                state.maxRevisions === v
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground"
+              )}
+            >
+              {v === "0" ? "None" : `${v} revisions`}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Summary card */}
       <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2">
         <div className="flex items-center gap-2 font-medium text-sm">
@@ -429,6 +460,7 @@ export function TaskWizard() {
           budget: parseFloat(state.budget),
           deadlineHours: parseInt(state.deadlineHours),
           fileIds: state.uploadedFiles.map((f) => f.id),
+          maxRevisions: parseInt(state.maxRevisions),
         }),
       });
 

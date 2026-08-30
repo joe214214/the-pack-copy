@@ -307,5 +307,27 @@ export function createServer() {
     }
   );
 
+  // 6. get_revision_feedback
+  server.tool(
+    "get_revision_feedback",
+    "Get the publisher's revision feedback for a job you need to redo. Call this when you receive a revision job (currentRound > 1) to understand what the publisher wants changed. Returns feedback text, attached reference files, and round number.",
+    {
+      executionId: z.string()
+    },
+    async (params) => {
+      try {
+        const result = await apiClient.getRevisionFeedback(params.executionId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+        };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: `Error: ${e.message}` }],
+          isError: true
+        };
+      }
+    }
+  );
+
   return server;
 }

@@ -64,6 +64,7 @@ const THEPACK_TOOLS = [
   "mcp__thepack__submit_result",
   "mcp__thepack__upload_file",
   "mcp__thepack__submit_image_result",
+  "mcp__thepack__get_revision_feedback",
 ];
 
 // Claude Code's built-in local tools — ALWAYS allowed. The worker needs its
@@ -88,9 +89,10 @@ const WORK_PROMPT = [
   "2. Call mcp__thepack__get_assigned_jobs to list jobs dispatched to you. If there are none, stop.",
   "3. For EACH job:",
   "   a. Read the full task brief. If the job has inputFiles, call mcp__thepack__get_input_file(fileId) for each — it DOWNLOADS the file into your working directory and returns its filePath; open that path directly with your tools (e.g. Pillow for images). Do not ask for base64.",
-  "   b. Call mcp__thepack__set_task_plan with an ordered checklist of 3-6 short step titles.",
-  "   c. Do the work step by step. After finishing each step, call mcp__thepack__report_progress with that step's id and status \"done\" plus a one-line note (so the publisher sees live progress).",
-  "   d. Deliver in the exact form the task asks for. READ the task's outputFormat and description and pick the matching method — the publisher's stated output format wins over the task type:",
+  "   b. If the job has currentRound > 1, this is a REVISION job. First call mcp__thepack__get_revision_feedback(executionId) to read the publisher's feedback. Then redo the work addressing the specific feedback. If there are feedbackFiles in the feedback, use mcp__thepack__get_input_file(fileId) to read them.",
+  "   c. Call mcp__thepack__set_task_plan with an ordered checklist of 3-6 short step titles.",
+  "   d. Do the work step by step. After finishing each step, call mcp__thepack__report_progress with that step's id and status \"done\" plus a one-line note (so the publisher sees live progress).",
+  "   e. Deliver in the exact form the task asks for. READ the task's outputFormat and description and pick the matching method — the publisher's stated output format wins over the task type:",
   "      - TEXT / markdown / or a link is requested: call mcp__thepack__submit_result with the executionId and the complete result as markdown (put any URL, e.g. a Figma link, inside the markdown).",
   "      - AN IMAGE is requested (the brief/outputFormat says image, PNG, screenshot, 'as an image', a picture, a mockup rendered as an image, or the task type is IMAGE_GENERATION / IMAGE_EDITING): deliver an actual image file via mcp__thepack__upload_file then mcp__thepack__submit_image_result(executionId, fileIds=[the returned id], result note).",
   "         · If you produced the file LOCALLY (Pillow, ffmpeg, any script — the normal case): call mcp__thepack__upload_file(executionId, filename, contentType, filePath=<ABSOLUTE path of the file in your workspace>). The upload server reads it from disk — works for any size. NEVER paste large base64.",

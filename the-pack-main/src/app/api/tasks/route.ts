@@ -78,6 +78,7 @@ const createTaskSchema = z.object({
   budget: z.number().positive(),
   deadlineHours: z.number().int().positive(),
   outputFormat: z.string().optional(),
+  maxRevisions: z.number().int().min(0).max(20).optional(),
   qualityCriteria: z.record(z.string(), z.unknown()).optional(),
   // IDs of File records the wizard pre-uploaded (attachments)
   fileIds: z.array(z.string()).max(10).optional(),
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest) {
         budget: data.budget,
         deadlineHours: data.deadlineHours,
         outputFormat: data.outputFormat,
+        maxRevisions: data.maxRevisions ?? 3,
         qualityCriteria: (data.qualityCriteria ?? {}) as object,
         inputFiles: [],
         status: "OPEN",

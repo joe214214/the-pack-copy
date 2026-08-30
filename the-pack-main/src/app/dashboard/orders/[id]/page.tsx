@@ -12,7 +12,7 @@ import { getTaskType } from "@/lib/task-types";
 import {
   ArrowLeft, Bot, CheckCircle2, Clock, DollarSign, FileText,
   Loader2, ShoppingCart, Star, AlertTriangle, Zap,
-  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, ImageIcon, Download, ExternalLink,
+  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, ImageIcon, Download, ExternalLink, RotateCcw, ChevronDown, ChevronUp, Plus,
 } from "lucide-react";
 
 // File types the browser can render in a tab, so we offer an "Open / preview"
@@ -111,7 +111,7 @@ export default function OrderDetailPage() {
 
   // Live-refresh while the agent is working so the publisher sees progress update
   useEffect(() => {
-    if (order?.status !== "EXECUTING") return;
+    if (order?.status !== "EXECUTING" && order?.status !== "REVISION_REQUESTED") return;
     const t = setInterval(fetchOrder, 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -236,6 +236,15 @@ export default function OrderDetailPage() {
       done: true,
     });
   }
+  if (order.status === "REVISION_REQUESTED") {
+    timeline.push({
+      icon: <RotateCcw className="h-3.5 w-3.5" />,
+      label: `Revision Requested (Round ${order.currentRound})`,
+      time: fmt(order.updatedAt),
+      done: true,
+      active: true,
+    });
+  }
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -256,9 +265,16 @@ export default function OrderDetailPage() {
             )}
           </div>
           <h1 className="text-2xl font-bold">{order.task?.title ?? "Untitled"}</h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Order ID: <span className="font-mono">{order.id}</span>
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-muted-foreground">
+              Order ID: <span className="font-mono">{order.id}</span>
+            </p>
+            {order.currentRound > 1 && (
+              <Badge variant="outline" className="text-xs text-orange-400 bg-orange-500/10 border-orange-500/30">
+                Round {order.currentRound} / {(order.task?.maxRevisions ?? 3) + (order.extraRevisions ?? 0) + 1}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {/* Action buttons */}
@@ -687,6 +703,87 @@ export default function OrderDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Revision History */}
+          {order.revisions && order.revisions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground font-semibold">
+                  Revision History
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {(order.revisions as any[])
+                  .sort((a: any, b: any) => b.round - a.round)
+                  .map((rev: any) => (
+                    <div
+                      key={rev.id}
+                      className="p-3 rounded-lg bg-zinc-800/50 border border-zinc-700/50 space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-orange-400">
+                          Round {rev.round} → {rev.round + 1}
+                        </span>
+                        {rev.previousScore != null && (
+                          <span className="text-xs text-muted-foreground">
+                            Score: {(rev.previousScore * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-zinc-300">{rev.feedback}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(rev.createdAt).toLocaleString(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Buy Extra Rounds */}
+          {order.status === "REVIEW" &&
+            order.currentRound > (order.task?.maxRevisions ?? 3) + (order.extraRevisions ?? 0) && (
+              <Card className="border-orange-500/30">
+                <CardContent className="pt-4 space-y-2">
+                  <p className="text-sm text-orange-400 font-medium">
+                    No revisions remaining
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Purchase extra rounds at 10% of task budget per round.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+                    onClick={async () => {
+                      setActing(true);
+                      try {
+                        const res = await fetch(`/api/orders/${order.id}/add-revisions`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ rounds: 1 }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error);
+                        toast.success(`Added 1 revision round ($${data.costCharged.toFixed(2)} charged)`);
+                        await fetchOrder();
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "Failed to add revisions");
+                      } finally {
+                        setActing(false);
+                      }
+                    }}
+                    disabled={acting}
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-2" />
+                    Buy 1 Extra Revision · ${((n(order.task?.budget) * 0.10)).toFixed(2)}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
         </div>
       </div>

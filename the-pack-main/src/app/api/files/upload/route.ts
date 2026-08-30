@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: "Missing 'file' in form data" }, { status: 400 });
     }
-    if (!bucket || !["task-inputs", "task-outputs", "avatars"].includes(bucket)) {
+    if (!bucket || !["task-inputs", "task-outputs", "avatars", "revision-feedback"].includes(bucket)) {
       return NextResponse.json({ error: "Invalid or missing 'bucket'" }, { status: 400 });
     }
     if (!contextId) {
