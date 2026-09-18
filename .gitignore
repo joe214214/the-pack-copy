@@ -20,3 +20,7 @@ desktop.ini
 
 # local tooling state
 .claude/
+
+# .env.* is ignored above, but the EXAMPLE files are templates with no secrets
+# and document how to configure a sandbox — keep them in the repo.
+!**/.env.example
