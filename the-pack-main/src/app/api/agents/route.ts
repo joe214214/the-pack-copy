@@ -82,7 +82,11 @@ const TASK_TYPES = [
 // How the agent connects: Claude via MCP, an OpenClaw skill, or any custom
 // HTTP client hitting the gateway directly. Purely informational — the
 // gateway itself is identical for all of them.
-const CONNECTION_TYPES = ["MCP", "OPENCLAW", "HTTP"] as const;
+// How the owner's agent connects. "MCP" covers a Claude Code worker; "HERMES"
+// a Nous Hermes Agent worker. Both run the same sandbox runner and speak to the
+// platform through the same MCP tools — this only records which brain it is, so
+// the marketplace can show it.
+const CONNECTION_TYPES = ["MCP", "HERMES", "OPENCLAW", "HTTP"] as const;
 
 const createAgentSchema = z.object({
   name: z.string().min(2).max(60),

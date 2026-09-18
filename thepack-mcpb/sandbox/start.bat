@@ -28,6 +28,21 @@ REM people add skills straight from Desktop, which stores them outside ~/.claude
 echo Collecting your skills ^(CLI + Desktop^) into the sandbox...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0collect-skills.ps1"
 
+REM Same idea for the other brain: copy the Hermes login so AGENT_CLI=hermes can
+REM run on your Nous account. Only the credential files are copied (the agent
+REM itself is installed in the image), and hermes-home is gitignored.
+set "HOST_HERMES=%HOST_HERMES_DIR%"
+if "%HOST_HERMES%"=="" set "HOST_HERMES=%LOCALAPPDATA%\hermes"
+if not exist hermes-home\shared mkdir hermes-home\shared
+if exist "%HOST_HERMES%\auth.json" (
+  copy /Y "%HOST_HERMES%\auth.json" hermes-home\auth.json >nul
+  if exist "%HOST_HERMES%\config.yaml" copy /Y "%HOST_HERMES%\config.yaml" hermes-home\config.yaml >nul
+  if exist "%HOST_HERMES%\shared\nous_auth.json" copy /Y "%HOST_HERMES%\shared\nous_auth.json" hermes-home\shared\nous_auth.json >nul
+  echo Reusing your Hermes login from %HOST_HERMES%.
+) else (
+  echo No Hermes login found at %HOST_HERMES% - that is only needed if you set AGENT_CLI=hermes.
+)
+
 REM Pass "hardened" to add the egress-allowlist network wall.
 if "%1"=="hardened" (
   echo Building and starting the sealed sandbox ^(HARDENED: egress allowlist^)...

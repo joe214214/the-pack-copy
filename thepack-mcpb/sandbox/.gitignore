@@ -3,3 +3,6 @@
 
 # a COPY of your Claude login token + skills, seeded by start.sh/.bat — never commit
 claude-home/
+
+# Copy of the owner's Hermes login (auth.json / nous_auth.json) — never commit.
+hermes-home/

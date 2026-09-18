@@ -2077,3 +2077,58 @@ model Revision {
 5. **Rich feedback**: Publishers attach files (images/PDFs) as revision reference; agent accesses them via `get_input_file`.
 
 ### State: committed and pushed.
+
+## 2026-09-01 — Second brain: Nous Hermes Agent support (AGENT_CLI)
+
+### What
+ThePack agents can now be powered by **Nous Hermes Agent** instead of Claude Code,
+at full parity: sandboxed, MCP-wired, same job loop, same delivery pipeline.
+One switch picks the brain — `AGENT_CLI=claude` (default) or `AGENT_CLI=hermes`.
+
+### Why it works at all
+Hermes has the two things that made Claude Code sandboxable:
+- **Headless one-shot**: `hermes -z "<prompt>"` — "print ONLY the final response
+  … approvals are auto-bypassed. Intended for scripts / pipes." (= `claude -p`)
+- **MCP**: `hermes mcp add <name> --command node --args …` so our 13 ThePack tools
+  are callable. Bonus over Claude: `--usage-file` writes a per-run cost/token
+  report (useful for marketplace accounting), plus `-m/--provider/--reasoning`
+  and `-t TOOLSETS` (its equivalent of `--allowedTools`).
+
+### Runner (thepack-mcpb/src/runner.ts)
+- `runClaude()` → `runAgent()`, now CLI-agnostic: workspace, watchdog, streaming
+  and cleanup are shared; only command construction branches.
+- Hermes branch spawns **without a shell**, passing argv directly — its one-shot
+  flag takes the prompt as an ARGUMENT (it cannot read stdin), and argv avoids
+  every quoting/length problem a multi-KB prompt would hit through a shell.
+- `ensureHermesMcp()` registers the ThePack MCP server at startup
+  (remove-then-add = idempotent, picks up a changed key/URL). **Gotcha:**
+  `mcp add` is interactive — it asks "Enable all N tools?" — so the runner
+  answers `Y` on stdin, otherwise registration silently cancels.
+- Connector discovery (`claude mcp list`) is skipped for Hermes: claude.ai
+  connectors are a Claude-account concept.
+
+### Sandbox
+- Base image **node:20-slim → node:24-slim**: the Hermes installer rejects Node 20
+  (wants 22.22+/24.11+/26+) and would otherwise download a second Node runtime.
+- apt adds `curl ripgrep xz-utils build-essential` — **without a C++ compiler the
+  installer cannot build node-pty and Hermes never lands** (first attempt failed
+  exactly here).
+- Installed as the `worker` user via `install.sh … --skip-setup` (non-interactive);
+  binary at `~/.local/bin/hermes`, agent at `~/.hermes/hermes-agent`.
+  `--build-arg INSTALL_HERMES=0` for a leaner Claude-only image.
+- Credentials: `~/.hermes` holds the installed agent AS WELL AS the config, so it
+  cannot be mounted over the way `./claude-home` is. Instead `./hermes-home` is
+  mounted read-only beside it and the entrypoint copies `auth.json`,
+  `config.yaml`, `shared/nous_auth.json` into place. start.bat seeds it from
+  `%LOCALAPPDATA%\hermes`. **hermes-home/ added to .gitignore** (it holds a login).
+
+### Platform
+`CONNECTION_TYPES` += `HERMES` so an agent can record which brain it runs.
+
+### Verified end to end (twice)
+- Host: runner in Hermes mode → picked up the job → 4-step plan → progress →
+  `submit_result` → **COMPLETED in 1m37s**, auto-review 88%.
+- **Sandbox**: same flow inside the container → **COMPLETED in 1m27s**, auto-review
+  88.2%, delivered a real markdown file. Container shows `hermes v0.21.3`,
+  credentials injected, "ThePack MCP server registered with Hermes."
+- `tsc` clean for platform and mcp.

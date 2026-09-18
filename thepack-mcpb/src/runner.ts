@@ -55,6 +55,21 @@ const agentKey: string = opts.agentKey;
 const serverUrl: string = String(opts.serverUrl).replace(/\/$/, "");
 const pollMs = Math.max(5, parseInt(opts.interval, 10) || 15) * 1000;
 
+// ── Which agent CLI is the brain ─────────────────────────────────────────────
+// The runner is CLI-agnostic: everything after the job is picked up (plan,
+// progress, delivery) goes through the ThePack MCP tools, so swapping the brain
+// only changes how we launch it. Both CLIs offer the two things this needs: a
+// headless one-shot mode, and MCP so our tools are callable.
+//
+//   claude  -> `claude -p`      (Anthropic Claude Code)
+//   hermes  -> `hermes -z`      (Nous Hermes Agent)
+//
+// Set AGENT_CLI in the sandbox .env. HERMES_BIN overrides the executable path
+// when `hermes` is not on PATH.
+const AGENT_CLI = (process.env.AGENT_CLI || "claude").trim().toLowerCase();
+const IS_HERMES = AGENT_CLI === "hermes";
+const HERMES_BIN = (process.env.HERMES_BIN || "hermes").trim();
+
 const THEPACK_TOOLS = [
   "mcp__thepack__whoami",
   "mcp__thepack__get_assigned_jobs",
@@ -119,6 +134,42 @@ writeFileSync(
 
 function log(msg: string) {
   console.log(`[runner ${new Date().toLocaleTimeString()}] ${msg}`);
+}
+
+// Run a command to completion, returning its exit code. Used for the small
+// setup/discovery commands (never for the agent run itself, which needs the
+// watchdog and streaming in runAgent()).
+function run(cmd: string, args: string[], stdin = "", timeoutMs = 120_000): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { shell: false });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      resolve(-1);
+    }, timeoutMs);
+    child.stdin.end(stdin);
+    child.on("close", (code) => { clearTimeout(timer); resolve(code ?? -1); });
+    child.on("error", () => { clearTimeout(timer); resolve(-1); });
+  });
+}
+
+// Hermes keeps MCP servers in its own persistent config rather than taking a
+// per-invocation config file like Claude's --mcp-config, so we (re)register the
+// ThePack server once at startup. Remove-then-add keeps it idempotent and picks
+// up a changed agent key or server URL. `--args` must come last.
+async function ensureHermesMcp(): Promise<void> {
+  await run(HERMES_BIN, ["mcp", "remove", "thepack"]); // may not exist — ignore
+  // `mcp add` connects, lists the discovered tools, then asks "Enable all N
+  // tools?" on stdin. Answer it so registration completes unattended.
+  const code = await run(HERMES_BIN, [
+    "mcp", "add", "thepack",
+    "--command", "node",
+    "--args", mcpEntry, "-k", agentKey, "-s", serverUrl,
+  ], "Y\n");
+  log(
+    code === 0
+      ? "ThePack MCP server registered with Hermes."
+      : `WARNING: could not register the ThePack MCP server with Hermes (exit ${code}). The agent will not be able to fetch or submit jobs.`
+  );
 }
 
 async function api(endpoint: string, init?: RequestInit) {
@@ -199,8 +250,42 @@ async function refreshApprovedConnectors() {
 // OS temp dir.
 const jobsRoot = process.env.JOBS_DIR || tmpdir();
 
-function runClaude(): Promise<void> {
+// How to launch the Nous Hermes Agent for one job. Hermes' one-shot flag takes
+// the prompt as an ARGUMENT (it cannot be read from stdin), so we spawn without
+// a shell and hand argv across directly — that sidesteps quoting entirely and
+// the OS argument limit is far above our multi-KB prompt. Approvals are already
+// auto-bypassed in one-shot mode, so there is no separate permission flag.
+function hermesCommand(workDir: string): { cmd: string; args: string[] } {
+  const args = ["-z", WORK_PROMPT];
+
+  // Model / provider / reasoning overrides, same idea as CLAUDE_MODEL.
+  const model = (process.env.HERMES_MODEL || "").trim();
+  if (model) args.push("-m", model);
+  const provider = (process.env.HERMES_PROVIDER || "").trim();
+  if (provider) args.push("--provider", provider);
+  const reasoning = (process.env.HERMES_REASONING || "").trim();
+  if (reasoning) args.push("--reasoning", reasoning);
+
+  // Optional tool allowlist. Hermes names built-in toolsets plainly ("web") and
+  // MCP tools as server:tool ("thepack:submit_result"). Left unset the agent
+  // keeps its full toolset, which is what the sealed container assumes.
+  const toolsets = (process.env.HERMES_TOOLSETS || "").trim();
+  if (toolsets) args.push("-t", toolsets);
+
+  // Per-run cost/token report. Written even when the run fails, so the platform
+  // side can account for what a job actually cost to produce.
+  args.push("--usage-file", path.join(workDir, "usage.json"));
+
+  return { cmd: HERMES_BIN, args };
+}
+
+function runAgent(): Promise<void> {
   return new Promise((resolve) => {
+    // Per-run scratch space, created first because the Hermes command line
+    // embeds a path inside it (the usage report).
+    const workDir = mkdtempSync(path.join(jobsRoot, "job-"));
+    const isWin = process.platform === "win32";
+
     const bypass = process.env.RUNNER_BYPASS === "1";
     // Owner-approved claude.ai connectors the worker may use, by MCP server name
     // (e.g. "claude_ai_Figma"). These come from what the owner ticked in ThePack
@@ -214,39 +299,43 @@ function runClaude(): Promise<void> {
     const allowedConnectors = approvedConnectors;
     const inheritConnectors = allowedConnectors.length > 0;
 
-    const args = ["-p", "--mcp-config", cfgPath, "--output-format", "text"];
-    if (!inheritConnectors) args.push("--strict-mcp-config");
-
-    // Which model the rented agent thinks with. Unset => the account default.
-    // Accepts an alias ("opus", "sonnet", "fable") or a full model name. Useful
-    // both to control cost/latency and to make a skill's contribution visible:
-    // a strong model already knows a lot, so a skill adds little on top of it.
-    const model = (process.env.CLAUDE_MODEL || "").trim();
-    if (model) args.push("--model", model);
-
-    if (bypass && !inheritConnectors) {
-      // Sandbox full-power mode with no connectors loaded: skip perms entirely.
-      args.push("--dangerously-skip-permissions");
-    } else {
-      // Allowlist mode: local tools are ALWAYS in (Pillow via Bash, file IO, …);
-      // the list is the wall only for CONNECTORS — un-approved connectors load
-      // but stay uninvokable, so we never bypass perms here.
-      const connectorTools = allowedConnectors.map((c) => `mcp__${c}`);
-      args.push("--allowedTools", ...LOCAL_TOOLS, ...THEPACK_TOOLS, ...connectorTools);
-    }
-
-    const workDir = mkdtempSync(path.join(jobsRoot, "job-"));
-
-    // shell:true so Windows resolves the `claude` shim; prompt goes via stdin to
-    // avoid any quoting issues with the long multi-line instruction. cwd is the
-    // isolated per-run workspace.
-    const quoted = args
-      .map((a) => (a.includes(" ") || a.includes("\\") ? `"${a}"` : a))
-      .join(" ");
     // detached on POSIX so the child is a process-group leader — lets the
-    // watchdog kill the WHOLE tree (shell + claude + any grandchild) on timeout.
-    const isWin = process.platform === "win32";
-    const child = spawn(`claude ${quoted}`, { shell: true, cwd: workDir, detached: !isWin });
+    // watchdog kill the WHOLE tree (shell + agent + any grandchild) on timeout.
+    let child;
+    if (IS_HERMES) {
+      // Hermes takes the prompt as an argument, so spawn without a shell and
+      // pass argv straight through: no quoting rules to get wrong.
+      const { cmd, args } = hermesCommand(workDir);
+      child = spawn(cmd, args, { shell: false, cwd: workDir, detached: !isWin });
+    } else {
+      const args = ["-p", "--mcp-config", cfgPath, "--output-format", "text"];
+      if (!inheritConnectors) args.push("--strict-mcp-config");
+
+      // Which model the rented agent thinks with. Unset => the account default.
+      // Accepts an alias ("opus", "sonnet", "fable") or a full model name. Useful
+      // both to control cost/latency and to make a skill's contribution visible:
+      // a strong model already knows a lot, so a skill adds little on top of it.
+      const model = (process.env.CLAUDE_MODEL || "").trim();
+      if (model) args.push("--model", model);
+
+      if (bypass && !inheritConnectors) {
+        // Sandbox full-power mode with no connectors loaded: skip perms entirely.
+        args.push("--dangerously-skip-permissions");
+      } else {
+        // Allowlist mode: local tools are ALWAYS in (Pillow via Bash, file IO, …);
+        // the list is the wall only for CONNECTORS — un-approved connectors load
+        // but stay uninvokable, so we never bypass perms here.
+        const connectorTools = allowedConnectors.map((c) => `mcp__${c}`);
+        args.push("--allowedTools", ...LOCAL_TOOLS, ...THEPACK_TOOLS, ...connectorTools);
+      }
+
+      // shell:true so Windows resolves the `claude` shim; prompt goes via stdin
+      // to avoid any quoting issues with the long multi-line instruction.
+      const quoted = args
+        .map((a) => (a.includes(" ") || a.includes("\\") ? `"${a}"` : a))
+        .join(" ");
+      child = spawn(`claude ${quoted}`, { shell: true, cwd: workDir, detached: !isWin });
+    }
 
     // resolve() must fire exactly once — close, error, AND the watchdog can race.
     let settled = false;
@@ -259,14 +348,14 @@ function runClaude(): Promise<void> {
       resolve();
     };
 
-    // Watchdog: a claude run can HANG indefinitely (e.g. a stalled API response
+    // Watchdog: an agent run can HANG indefinitely (e.g. a stalled API response
     // stream that never errors or closes). Without this the promise never
     // resolves, `busy` stays true forever, and the runner silently stops taking
     // work. Kill it after CLAUDE_TIMEOUT_MIN and let the loop retry the job.
     const timeoutMs =
       Math.max(1, parseInt(process.env.CLAUDE_TIMEOUT_MIN || "15", 10) || 15) * 60_000;
     const watchdog = setTimeout(() => {
-      log(`claude exceeded ${Math.round(timeoutMs / 60000)} min with no exit — killing (likely a stalled network stream); the job will be retried`);
+      log(`${AGENT_CLI} exceeded ${Math.round(timeoutMs / 60000)} min with no exit — killing (likely a stalled network stream); the job will be retried`);
       try {
         if (!isWin && child.pid) process.kill(-child.pid, "SIGKILL"); // whole group
         else child.kill("SIGKILL");
@@ -276,14 +365,15 @@ function runClaude(): Promise<void> {
       finish();
     }, timeoutMs);
 
-    child.stdin.write(WORK_PROMPT);
+    // Claude reads the instruction from stdin; Hermes already has it in argv.
+    if (!IS_HERMES) child.stdin.write(WORK_PROMPT);
     child.stdin.end();
 
     child.stdout.on("data", (d) => process.stdout.write(d));
     child.stderr.on("data", (d) => process.stderr.write(d));
-    child.on("close", (code) => finish(`claude finished (exit ${code})`));
+    child.on("close", (code) => finish(`${AGENT_CLI} finished (exit ${code})`));
     child.on("error", (e) =>
-      finish(`failed to launch claude: ${e.message}. Is the 'claude' CLI on PATH?`)
+      finish(`failed to launch ${AGENT_CLI}: ${e.message}. Is the '${IS_HERMES ? HERMES_BIN : "claude"}' CLI on PATH?`)
     );
   });
 }
@@ -291,8 +381,10 @@ function runClaude(): Promise<void> {
 async function tick() {
   // Periodically (startup + every 5 min) re-discover the account's connectors
   // and piggyback them on the heartbeat so the website checklist stays fresh.
+  // Connectors are a claude.ai account concept, so this only applies when Claude
+  // is the brain; Hermes gets its tools from its own MCP registrations instead.
   let discovered: string[] | undefined;
-  if (Date.now() - lastDiscoveryAt > DISCOVER_EVERY_MS) {
+  if (!IS_HERMES && Date.now() - lastDiscoveryAt > DISCOVER_EVERY_MS) {
     lastDiscoveryAt = Date.now();
     discovered = await discoverConnectors();
     log(`connectors on this Claude account: ${discovered.length ? discovered.join(", ") : "none found"}`);
@@ -313,12 +405,12 @@ async function tick() {
     const data = await api("/api/agent-gateway/jobs");
     const count = data.count ?? (data.jobs?.length || 0);
     if (count > 0) {
-      log(`${count} job(s) dispatched — handing off to local Claude…`);
+      log(`${count} job(s) dispatched — handing off to local ${IS_HERMES ? "Hermes" : "Claude"}…`);
       busy = true;
       // Re-read the owner's approved connectors so a change on the website takes
       // effect on the next job without restarting the runner.
-      await refreshApprovedConnectors();
-      await runClaude();
+      if (!IS_HERMES) await refreshApprovedConnectors();
+      await runAgent();
       busy = false;
     }
   } catch (e) {
@@ -328,11 +420,23 @@ async function tick() {
 }
 
 log(`ThePack runner started. server=${serverUrl} poll=${pollMs / 1000}s`);
-log(
-  `Brain: local 'claude' CLI, model=${process.env.CLAUDE_MODEL?.trim() || "account default"} (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "local tools + ThePack tools"}; connectors gated by owner approval).`
-);
+if (IS_HERMES) {
+  log(
+    `Brain: local '${HERMES_BIN}' CLI (Nous Hermes Agent), model=${process.env.HERMES_MODEL?.trim() || "config default"}${process.env.HERMES_PROVIDER ? ` provider=${process.env.HERMES_PROVIDER.trim()}` : ""} (one-shot mode; approvals auto-bypassed).`
+  );
+} else {
+  log(
+    `Brain: local 'claude' CLI, model=${process.env.CLAUDE_MODEL?.trim() || "account default"} (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "local tools + ThePack tools"}; connectors gated by owner approval).`
+  );
+}
 log("Leave this running. Assign tasks to this agent on the website — they'll be handled automatically.");
 
-void refreshApprovedConnectors();
-void tick();
-setInterval(() => void tick(), pollMs);
+// Hermes needs the ThePack MCP server registered in its own config before the
+// first job; Claude gets the same wiring per-run via --mcp-config.
+async function start() {
+  if (IS_HERMES) await ensureHermesMcp();
+  else void refreshApprovedConnectors();
+  void tick();
+  setInterval(() => void tick(), pollMs);
+}
+void start();
