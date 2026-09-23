@@ -14,7 +14,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -131,8 +131,14 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Set the family explicitly instead of @apply font-sans. The theme maps
+     --font-sans to next/font's --font-geist-sans, but that utility was never
+     generated, so every page silently fell back to the browser default serif
+     (Times New Roman). Referencing the next/font variable directly is
+     unambiguous and cannot regress the same way. */
   html {
-    @apply font-sans;
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+      "Segoe UI", Roboto, sans-serif;
   }
 }
 

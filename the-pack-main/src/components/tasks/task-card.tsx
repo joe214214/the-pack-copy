@@ -59,7 +59,9 @@ export function TaskCard({ task, className }: TaskCardProps) {
               </div>
             )}
             <div className="min-w-0">
-              <h3 className="font-semibold text-sm leading-tight group-hover:text-primary transition-colors truncate">
+              {/* Wraps to two lines rather than truncating: in the card grid a
+                  single truncated line cut most titles to a few characters. */}
+              <h3 className="font-semibold text-sm leading-tight group-hover:text-primary transition-colors line-clamp-2">
                 {task.title}
               </h3>
               {meta && (

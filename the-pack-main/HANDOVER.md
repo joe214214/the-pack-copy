@@ -2132,3 +2132,104 @@ Hermes has the two things that made Claude Code sandboxable:
   88.2%, delivered a real markdown file. Container shows `hermes v0.21.3`,
   credentials injected, "ThePack MCP server registered with Hermes."
 - `tsc` clean for platform and mcp.
+
+## 2026-09-18 — Image generation: investigated, unresolved by any free route
+
+### Outcome
+Agents still cannot generate real AI images autonomously. Image tasks continue to
+fall back to code-drawn vector art (PIL/cairosvg) — real PNGs, but not what a
+customer means by "an illustration". **Recommendation: a paid image API.**
+
+Full write-up with commands, versions and verbatim errors:
+**`guide/IMAGE_GENERATION_RESEARCH.md`** — written to be handed to someone who
+was not in the session.
+
+### Short version of why each option failed
+- **Gemini API key**: valid, but every image model is `limit: 0` on the free tier
+  ("generate_content_free_tier_requests, limit: 0"). Billing would fix it today.
+- **Gemini consumer subscription / Antigravity**: no CLI at all. Antigravity is a
+  GUI Electron app whose auth is a Chromium cookie jar — cannot be sandboxed.
+- **Gemini CLI**: has headless mode, but Google removed the free individual tier
+  mid-investigation: "This client is no longer supported for Gemini Code Assist
+  for individuals… migrate to the Antigravity suite."
+- **Codex CLI**: DOES ship a built-in `image_gen` (gpt-image-2) that needs no API
+  key and runs on the ChatGPT subscription, with copyable OAuth auth — but it is
+  **not exposed in `codex exec`**, the headless mode our runner must use.
+  Confirmed four ways (fell back to PIL; `--enable image_generation` did not help;
+  its own tool list has only `view_image`; no image plugin in the catalogue).
+  It works in the interactive TUI. Codex is alpha (0.133.0-alpha.1) — **worth
+  re-checking after upgrades**, as it would otherwise be the best option.
+- **Local Stable Diffusion**: free and automatable (RTX 5070 handles it), but
+  rejected — a local GPU does not scale for a commercial, multi-tenant product.
+- **Unofficial codex-imagegen-cli**: reuses the Codex OAuth token as an API
+  credential. ToS risk and revocable — not for production.
+
+### The pattern
+Vendors keep image generation inside the interactive product and charge for
+programmatic access. Treat "free + automated + real AI images" as unavailable.
+
+### Cost reality (why this is not actually a blocker)
+fal.ai / Replicate from **$0.003/image**; a $40 task with 10 images costs $0.03–$0.40,
+under 1% of revenue. Suggested model: the **agent owner brings their own image API
+key**, mirroring how they already bring their own Claude/Hermes login.
+
+### Integration cost is small
+`runner.ts` is already CLI-agnostic; adding images = one MCP tool
+(`generate_image`) + a key passed through sandbox/.env. The sandbox and the
+existing image delivery path (upload_file → submit_image_result, proven by the
+10-image Saber job) need no changes.
+
+---
+
+## 2026-09-22 — Mobile (375px) responsive pass, verified on a production build
+
+### What was broken
+Every dashboard page scrolled horizontally on a phone. The cause was **not** page
+content — it was the dashboard header (`src/components/layout/dashboard-header.tsx`).
+Its row is `flex` with nothing allowed to shrink: sidebar trigger + full breadcrumb
+trail + balance badge + bell + theme toggle + avatar. Measured widths gave the
+diagnosis away, because the overflow tracked breadcrumb length exactly:
+
+| page | document width at a 375px viewport |
+|---|---|
+| `/dashboard/tasks` ("Dashboard / Tasks") | 424px |
+| `/dashboard/tasks/new` ("Dashboard / Tasks / New") | 476px |
+| `/` (no dashboard header) | 375px ✅ |
+
+### Fixes
+1. **`src/components/layout/dashboard-header.tsx`** — on a phone only the current
+   breadcrumb renders (earlier crumbs `hidden sm:flex`), the nav gets
+   `min-w-0 flex-1` + `truncate`, the right cluster gets `shrink-0` and a tighter
+   `gap-1 sm:gap-2`, `px-3 sm:px-4`, and the bell is `hidden sm:inline-flex`
+   (it has no menu behind it yet, so it is the cheapest item to drop).
+2. **`src/app/dashboard/page.tsx`** — the page header was
+   `flex items-center justify-between`, pinning a 279px pair of action buttons
+   ("Browse Agents" / "New Task") beside the title with no wrap. Now
+   `flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between`.
+
+### Result — all 8 audited pages, production build, 375×812
+`home, dashboard, agents, tasks, orders, wallet, worker, newtask` →
+`document.scrollWidth === 375` on every one. No horizontal scroll.
+
+### ⚠️ Measurement trap — read this before re-running the audit
+Two separate false passes happened here. Both are easy to repeat:
+
+1. **Do not compare `scrollWidth` to `window.innerWidth`.** Under Chrome mobile
+   emulation `innerWidth` reports the *visual* viewport, which zooms out to fit
+   overflowing content — so it grows to match the overflow and the comparison
+   always passes. Compare against the hard target (375) instead. The working
+   script is `scratchpad/mobile3.mjs`; it also prints the outermost offending
+   element per page, which is what actually located the header.
+2. **Confirm the server you are measuring is the one you just built.** A
+   `TaskStop` on the `npm start` wrapper left the node process holding port 3100,
+   so a rebuild appeared to pass while an old process was still serving. Kill by
+   port (`netstat -ano | grep :3100` → `taskkill /F /PID`) and check the log says
+   `✓ Ready` before trusting a run.
+
+Launch Edge **without** `--window-size` (headless clamps it to 500) and set
+`Emulation.setDeviceMetricsOverride {width:375,height:812,deviceScaleFactor:1,mobile:true}`
+before navigating.
+
+### Known, not a bug
+On `/`, a decorative `w-96 h-96 blur-3xl` blob extends past 375px but sits inside
+an `overflow-hidden` parent, so `document.scrollWidth` stays 375.

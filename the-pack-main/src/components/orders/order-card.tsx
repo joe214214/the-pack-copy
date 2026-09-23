@@ -37,7 +37,12 @@ export function OrderCard({ order, viewAs = "publisher", className }: OrderCardP
     <Link href={`/dashboard/orders/${order.id}`}>
       <div
         className={cn(
-          "group flex flex-col sm:flex-row sm:items-center gap-4 rounded-xl border bg-card/50 p-4",
+          // Container query, not a viewport breakpoint: this card is used both
+          // full-width and at ~1/3 width inside the orders grid. `sm:flex-row`
+          // keyed off the viewport, so in the grid it still laid out
+          // horizontally at 360px wide and crushed the title. `@container` +
+          // `@md:` makes the card respond to its OWN width instead.
+          "@container group flex flex-col @md:flex-row @md:items-center gap-4 rounded-xl border bg-card/50 p-4",
           "transition-all duration-200 cursor-pointer",
           "hover:bg-card hover:shadow-md hover:shadow-primary/5 hover:border-primary/20 hover:-translate-y-0.5",
           className
@@ -54,11 +59,17 @@ export function OrderCard({ order, viewAs = "publisher", className }: OrderCardP
 
         {/* Main info */}
         <div className="flex-1 min-w-0 space-y-1.5">
-          <div className="flex items-start gap-2 flex-wrap">
-            <h3 className="font-semibold text-sm leading-tight group-hover:text-primary transition-colors truncate flex-1">
+          {/* The title wraps to two lines rather than truncating on one. In the
+              card grid these sit at ~1/3 width, where a single truncated line
+              cut most titles down to "Wander …" and made separate orders
+              indistinguishable. The badge keeps its own width. */}
+          <div className="flex items-start gap-2">
+            <h3 className="font-semibold text-sm leading-tight group-hover:text-primary transition-colors line-clamp-2 flex-1 min-w-0">
               {order.task?.title ?? "Untitled task"}
             </h3>
-            <OrderStatusBadge status={order.status} />
+            <div className="shrink-0">
+              <OrderStatusBadge status={order.status} />
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">

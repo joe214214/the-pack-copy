@@ -4,6 +4,7 @@ import { useTheme } from "next-themes";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
+import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -76,34 +77,50 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
   const { logout } = useAuth();
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-2 h-4" />
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
+      <SidebarTrigger className="-ml-1 shrink-0" />
+      <Separator orientation="vertical" className="mr-2 h-4 hidden sm:block" />
 
-      {/* Breadcrumbs */}
-      <nav className="flex items-center gap-1 text-sm" aria-label="Breadcrumb">
-        {breadcrumbs.map((crumb, i) => (
-          <div key={crumb.href} className="flex items-center gap-1">
-            {i > 0 && (
-              <span className="text-muted-foreground/40 mx-1">/</span>
-            )}
-            {i === breadcrumbs.length - 1 ? (
-              <span className="font-medium text-foreground">
-                {crumb.label}
-              </span>
-            ) : (
-              <Link
-                href={crumb.href}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {crumb.label}
-              </Link>
-            )}
-          </div>
-        ))}
+      {/* Breadcrumbs. On a phone only the current page shows. The full trail
+          plus the balance/bell/theme/avatar cluster measured ~450px, which put
+          every dashboard page into a horizontal scroll at 375px. */}
+      <nav
+        className="flex min-w-0 flex-1 items-center gap-1 text-sm"
+        aria-label="Breadcrumb"
+      >
+        {breadcrumbs.map((crumb, i) => {
+          const isLast = i === breadcrumbs.length - 1;
+          return (
+            <div
+              key={crumb.href}
+              className={cn(
+                "flex min-w-0 items-center gap-1",
+                !isLast && "hidden sm:flex"
+              )}
+            >
+              {i > 0 && (
+                <span className="text-muted-foreground/40 mx-1 hidden sm:inline">
+                  /
+                </span>
+              )}
+              {isLast ? (
+                <span className="truncate font-medium text-foreground">
+                  {crumb.label}
+                </span>
+              ) : (
+                <Link
+                  href={crumb.href}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {crumb.label}
+                </Link>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
         {/* Balance display */}
         {user?.balance && (
           <Badge variant="secondary" className="gap-1.5 px-3 py-1">
@@ -112,8 +129,9 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
           </Badge>
         )}
 
-        {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative">
+        {/* Notifications. Hidden on a phone: it has no menu behind it yet, so
+            it is the cheapest item to drop to keep the balance visible. */}
+        <Button variant="ghost" size="icon" className="relative hidden sm:inline-flex">
           <Bell className="size-4" />
           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary pulse-dot" />
         </Button>

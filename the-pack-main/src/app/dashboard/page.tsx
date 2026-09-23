@@ -112,8 +112,10 @@ const statusConfig: Record<
 export default function DashboardPage() {
   return (
     <div className="space-y-8">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
+      {/* Page header. Stacks on a phone: the two action buttons are 279px
+          wide together and, pinned beside the title by justify-between with no
+          wrap, they alone pushed this page to 447px at a 375px viewport. */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground mt-1">
@@ -121,7 +123,7 @@ export default function DashboardPage() {
             tasks.
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex shrink-0 gap-3">
           <Button variant="outline" render={<Link href="/dashboard/agents" />}>
             <Bot className="mr-2 h-4 w-4" />
             Browse Agents

@@ -6,6 +6,7 @@ import { OrderCard } from "@/components/orders/order-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ShoppingCart, Bot } from "lucide-react";
+import { layout } from "@/lib/design";
 
 type TabId = "publisher" | "agent-owner";
 
@@ -120,7 +121,7 @@ export default function OrdersPage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className={layout.gridCards}>
           {orders.map((order: Order) => (
             <OrderCard
               key={order.id}

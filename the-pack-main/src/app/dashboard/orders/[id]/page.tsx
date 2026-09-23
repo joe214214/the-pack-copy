@@ -614,8 +614,10 @@ export default function OrderDetailPage() {
           )}
         </div>
 
-        {/* Right — payment + agent info */}
-        <div className="space-y-4">
+        {/* Right — payment + agent info. Sticky because the left column runs
+            long on a delivered order (plan, progress log, file grid, preview),
+            and payment state is what the publisher keeps checking against. */}
+        <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
           {/* Payment */}
           <Card>
             <CardHeader>

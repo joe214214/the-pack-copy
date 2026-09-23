@@ -15,6 +15,7 @@ import {
   FileText,
   Globe,
 } from "lucide-react";
+import { layout } from "@/lib/design";
 
 type TabId = "open" | "mine";
 
@@ -114,8 +115,11 @@ export default function TasksPage() {
       </div>
 
       {/* Search + filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      {/* The search box gets a fixed width instead of flex-1. Sharing the row
+          with ten wrapping filter buttons, flex-1 gave it no minimum and it
+          collapsed to just the magnifier icon. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="relative w-full sm:w-72 sm:shrink-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search tasks..."
@@ -124,7 +128,7 @@ export default function TasksPage() {
             className="pl-9"
           />
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap sm:flex-1">
           <button
             onClick={() => setSelectedType("")}
             className={cn(
@@ -185,7 +189,7 @@ export default function TasksPage() {
           )}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className={layout.gridCards}>
           {filtered.map((task) => (
             <TaskCard key={task.id} task={task} />
           ))}
