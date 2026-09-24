@@ -1,17 +1,22 @@
 /**
  * File Storage Service
  *
- * Abstraction layer for file storage. Currently uses local filesystem.
- * Can be swapped to Supabase Storage / S3 / R2 by changing the implementation.
+ * Backed by Supabase Storage. It used to write to the local filesystem, which
+ * cannot work once the app is deployed: a serverless filesystem is read-only
+ * apart from /tmp, and /tmp is per-instance and discarded, so a file written
+ * while handling an upload was gone by the time a browser asked to download it.
  *
- * Storage layout: uploads/{bucket}/{contextId}/{timestamp}_{random}_{filename}
- * Buckets: task-inputs, task-outputs, avatars
+ * Key layout is unchanged — {bucket}/{contextId}/{timestamp}_{random}_{filename}
+ * — so keys already stored in the database keep resolving. The first path
+ * segment names the Supabase bucket and the remainder is the object path
+ * inside it.
+ *
+ * Buckets are private; files reach the browser through /api/files/[key], which
+ * looks the record up first. Nothing here hands out a public URL.
  */
-import * as fs from "fs/promises";
 import * as path from "path";
 import crypto from "crypto";
-
-const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), "uploads");
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export type StorageBucket = "task-inputs" | "task-outputs" | "avatars" | "revision-feedback";
 
@@ -28,10 +33,15 @@ const ALLOWED_TYPES: Record<StorageBucket, string[]> = {
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
     "application/pdf", "text/plain", "text/markdown", "text/csv", "application/json",
   ],
+  // text/html is here because the runner instructs agents to deliver a web
+  // page as an uploaded index.html. Anything script-capable in this list
+  // (text/html, image/svg+xml) is served under a sandbox CSP by
+  // /api/files/[key] so it cannot act as this site.
   "task-outputs": [
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
     "application/pdf", "text/plain", "text/markdown", "text/csv",
     "application/json", "application/octet-stream",
+    "text/html", "text/css", "text/javascript",
   ],
   "avatars": ["image/png", "image/jpeg", "image/webp", "image/gif"],
   "revision-feedback": [
@@ -46,6 +56,9 @@ const MAX_FILE_SIZE: Record<StorageBucket, number> = {
   "avatars": 2 * 1024 * 1024,
   "revision-feedback": 10 * 1024 * 1024,
 };
+
+/** Every bucket this module owns, for provisioning and key validation. */
+export const STORAGE_BUCKETS = Object.keys(ALLOWED_TYPES) as StorageBucket[];
 
 export class StorageError extends Error {
   constructor(message: string, public code: string) {
@@ -78,34 +91,64 @@ export function validateFile(bucket: StorageBucket, contentType: string, size: n
   }
 }
 
+/** Splits a storage key into the Supabase bucket and the path within it. */
+function splitKey(key: string): { bucket: StorageBucket; objectPath: string } {
+  const slash = key.indexOf("/");
+  if (slash <= 0 || slash === key.length - 1) {
+    throw new StorageError(`Malformed storage key: ${key}`, "INVALID_KEY");
+  }
+  const bucket = key.slice(0, slash) as StorageBucket;
+  if (!(bucket in ALLOWED_TYPES)) {
+    throw new StorageError(`Unknown bucket in key: ${key}`, "INVALID_KEY");
+  }
+  return { bucket, objectPath: key.slice(slash + 1) };
+}
+
 export async function uploadFile(
   bucket: StorageBucket, contextId: string, filename: string,
   content: Buffer, contentType: string
 ): Promise<UploadResult> {
   validateFile(bucket, contentType, content.length);
   const key = generateKey(bucket, contextId, filename);
-  const filePath = path.join(STORAGE_ROOT, key);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, content);
+  const { objectPath } = splitKey(key);
+
+  const { error } = await getSupabaseAdmin()
+    .storage
+    .from(bucket)
+    .upload(objectPath, content, { contentType, upsert: false });
+
+  if (error) {
+    throw new StorageError(
+      `Upload to bucket '${bucket}' failed: ${error.message}`,
+      "UPLOAD_FAILED"
+    );
+  }
+
   return { key, bucket, filename, contentType, size: content.length };
 }
 
 export async function readFile(key: string): Promise<Buffer> {
-  const filePath = path.join(STORAGE_ROOT, key);
-  try {
-    return await fs.readFile(filePath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new StorageError(`File not found: ${key}`, "NOT_FOUND");
-    }
-    throw err;
+  const { bucket, objectPath } = splitKey(key);
+
+  const { data, error } = await getSupabaseAdmin()
+    .storage
+    .from(bucket)
+    .download(objectPath);
+
+  if (error || !data) {
+    throw new StorageError(`File not found: ${key}`, "NOT_FOUND");
   }
+
+  return Buffer.from(await data.arrayBuffer());
 }
 
 export async function deleteFile(key: string): Promise<void> {
-  const filePath = path.join(STORAGE_ROOT, key);
-  try { await fs.unlink(filePath); } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  const { bucket, objectPath } = splitKey(key);
+  // Removing something that is already gone is reported the same way as a
+  // successful removal, so there is no missing-file case to special-case here.
+  const { error } = await getSupabaseAdmin().storage.from(bucket).remove([objectPath]);
+  if (error) {
+    throw new StorageError(`Delete of ${key} failed: ${error.message}`, "DELETE_FAILED");
   }
 }
 

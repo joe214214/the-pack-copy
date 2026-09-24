@@ -8,6 +8,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFile, StorageError } from "@/lib/storage";
 import { prisma } from "@/lib/prisma";
 
+/**
+ * Content types that execute script when a browser renders them. The bytes
+ * here were produced by an agent, so serving one of these same-origin would
+ * let a delivered file act as this site against whoever opened it. SVG counts:
+ * it can carry <script>.
+ */
+const ACTIVE_TYPES = new Set(["text/html", "image/svg+xml", "text/javascript"]);
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ key: string }> }
@@ -28,16 +36,24 @@ export async function GET(
     // Read file content from storage
     const content = await readFile(decodedKey);
 
-    // Return with correct Content-Type and cache headers
-    return new NextResponse(new Uint8Array(content), {
-      status: 200,
-      headers: {
-        "Content-Type": fileRecord.contentType,
-        "Content-Length": String(content.length),
-        "Content-Disposition": `inline; filename="${fileRecord.filename}"`,
-        "Cache-Control": "public, max-age=31536000, immutable",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": fileRecord.contentType,
+      "Content-Length": String(content.length),
+      "Content-Disposition": `inline; filename="${fileRecord.filename.replace(/"/g, "")}"`,
+      // Keys are unguessable and the object itself is private, but the response
+      // is still per-user content, so keep it out of shared caches.
+      "Cache-Control": "private, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+    };
+
+    if (ACTIVE_TYPES.has(fileRecord.contentType)) {
+      // Opaque origin: the delivered page can run, but not act as this site.
+      // Same treatment as /api/deliverables/[executionId]/[name].
+      headers["Content-Security-Policy"] =
+        "sandbox allow-scripts allow-forms allow-popups";
+    }
+
+    return new NextResponse(new Uint8Array(content), { status: 200, headers });
   } catch (error) {
     if (error instanceof StorageError && error.code === "NOT_FOUND") {
       return NextResponse.json({ error: "File not found" }, { status: 404 });

@@ -2233,3 +2233,180 @@ before navigating.
 ### Known, not a bug
 On `/`, a decorative `w-96 h-96 blur-3xl` blob extends past 375px but sits inside
 an `overflow-hidden` parent, so `document.scrollWidth` stays 375.
+
+---
+
+## 2026-09-23 — Deployed to Vercel
+
+**Live: https://the-pack-copy.vercel.app** (repo `joe214214/the-pack-copy`, branch
+`main` @ `de12694`, Vercel project root directory `the-pack-main`).
+
+### Setup that matters if this is ever re-imported
+- **Root Directory must be `the-pack-main`.** This is a monorepo; the repo root
+  has no Next app and the build fails without it.
+- `postinstall: prisma generate` in package.json is what makes the Prisma client
+  exist on Vercel. Do not remove it.
+- Vercel's import screen has no production-branch picker — it uses the repo's
+  default branch. `main` was fast-forwarded to the feature branch so the default
+  branch is the deployable one.
+- Env vars set: `DATABASE_URL`, `AUTH_SECRET`, `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+  `PLATFORM_FEE_PERCENT`.
+
+### Verified against the deployment
+| check | result |
+|---|---|
+| `/` and `/login` | HTTP 200, ~0.2s |
+| DB reachable | `POST /api/auth/login` returns the Alex Chen user |
+| font | `Geist` — the globals.css font fix survives a production build |
+| 375px | all 8 audited pages `document.scrollWidth === 375` |
+| 1440px | all 8 pages, no overflow, content column capped and centred |
+
+Screenshots: `design-audit/vercel/` (`375_*.png`, `1440_*.png`).
+Audit script: `scratchpad/mobile4.mjs <cookie> <outDir> <baseUrl> <width>`.
+
+### Still open on the deployment
+- `NEXT_PUBLIC_APP_URL` still points at localhost; set it to the Vercel domain
+  and redeploy (changing an env var does not trigger a rebuild by itself).
+- `DATABASE_URL` uses the Supabase **session** pooler on `5432`. Serverless holds
+  one connection per function instance; transaction mode (`6543` +
+  `?pgbouncer=true&connection_limit=1`) is the safer setting.
+- Uploaded files do not persist — `src/lib/storage.ts` writes to local disk and
+  Vercel's filesystem is ephemeral. Fine for a visual review, not for a full demo.
+- Agents do not run against the deployment: the runner and sandbox are local.
+  Point the runner at it with `-s https://the-pack-copy.vercel.app` if needed.
+- Supabase free tier sleeps after inactivity — wake it before showing the site.
+
+---
+
+## 2026-09-23 — Landing page rewritten for logged-out visitors
+
+### What was wrong
+The old `src/app/page.tsx` never said what the product does in words a newcomer
+knows. It opened with "AI-Powered Workforce Marketplace" and leaned on
+*auditable*, *escrowed*, *credit-scored* — all internal vocabulary. It also never
+showed the product: no screenshot, no preview, nothing but claims in cards. Ten
+cards in two grids, all styled identically, gave the page no rhythm.
+
+One outright bug: the hero's secondary CTA pointed at `/dashboard/agents`, which
+middleware bounces to `/login` for exactly the logged-out visitor the page is
+written for. Every link now stays on public routes.
+
+### What is there now
+- **Hero**: "Post a task. An AI agent finishes it." plus a paragraph that spells
+  out the whole loop in plain words. Two-column at `lg`, stacked below.
+- **`src/components/landing/hero-demo.tsx`** (new) — a self-running miniature of
+  one order looping every 10s: posted → matched → running (streaming log +
+  progress) → delivered (file + payment release). It uses the same card language
+  as the real app, so it stands in for the screenshot a logged-out visitor can
+  never see. This is the explanation and the animation in one.
+- **What you can hand over** — the real `TASK_TYPES` with their descriptions and
+  examples, so "what can it do" is concrete rather than abstract.
+- **How it works** — the four steps reworded without jargon ("It runs in the
+  open", "You accept, then it gets paid"), on a connector line at `lg`.
+- **Why you can trust what comes back** — the three real guarantees in plain
+  language: you see how it was done, it runs in a locked box, your money waits.
+- **Two ways to be here** — publisher vs agent owner. The old page ignored the
+  agent-owner side entirely, which hid half the marketplace.
+- **`src/components/landing/reveal.tsx`** (new) — IntersectionObserver
+  fade-and-lift on scroll, with stagger.
+
+### Reveal has three fallbacks, on purpose
+An element that starts at `opacity-0` is invisible if its animation never runs:
+1. `motion-reduce:` variants keep it visible under reduced-motion — in CSS, so
+   no JS needs to run. (This also replaced a synchronous `setState` in an effect
+   that `react-hooks/set-state-in-effect` correctly flagged.)
+2. A missing `IntersectionObserver` reveals on the next tick.
+3. `page.tsx` carries a `<noscript>` rule forcing `[data-reveal]` visible.
+
+`HeroDemo` starts on its *final* frame for the same reason — if the timer never
+starts, the visitor sees a finished order rather than an empty shell.
+
+### Verified — production build
+| width | document scrollWidth | font |
+|---|---|---|
+| 1440 | 1432 (no overflow) | Geist |
+| 768 | 760 (no overflow) | Geist |
+| 375 | 375 (no overflow) | Geist |
+
+`npx tsc --noEmit` clean, `npx eslint` clean on the new files.
+Screenshots: `design-audit/landing/`.
+
+### Screenshot gotcha
+`Reveal` sections sit at `opacity-0` until scrolled to, so a full-page capture of
+an unscrolled page is blank below the fold. `scratchpad/landing.mjs` scrolls the
+whole document first, then returns to the top before capturing.
+
+---
+
+## 2026-09-24 — File storage moved to Supabase Storage (deployment blocker)
+
+### Why
+`src/lib/storage.ts` wrote to `process.cwd()/uploads`. On Vercel the filesystem
+is read-only apart from `/tmp`, and `/tmp` is per-instance and discarded — so an
+uploaded file was gone by the time a browser asked to download it. This is the
+one thing that stopped a real order from completing on the deployment.
+
+It matters because it is the *primary* delivery path, not an edge case: the
+runner prompt tells agents to deliver images **and** web pages via
+`upload_file` → `fileIds` (`thepack-mcpb/src/runner.ts`, the IMAGE and WEB PAGE
+branches). Only the inline `outputFiles` path avoids storage, because those are
+stored as `data:` URIs in `Execution.outputFiles`.
+
+### What changed
+- **`src/lib/supabase/admin.ts`** (new) — service-role Supabase client. Distinct
+  from `./server.ts`, which is the cookie-bound SSR client acting as the signed-in
+  user and *cannot* write to storage. Server-only; the key has no `NEXT_PUBLIC_`
+  prefix so a client import fails the build rather than leaking it.
+- **`src/lib/storage.ts`** — `uploadFile` / `readFile` / `deleteFile` now go to
+  Supabase Storage. **The key format is unchanged**
+  (`{bucket}/{contextId}/{ts}_{rand}_{name}`), so keys already in the database
+  keep resolving; the first path segment names the bucket, the rest is the object
+  path. Everything else in the module was already pure and is untouched.
+- **`scripts/provision-storage.mts`** (new, `npm run storage:provision`) —
+  creates the four buckets, private, idempotent. **Must be run once against any
+  new Supabase project** or uploads fail.
+- **`scripts/storage-roundtrip.ts`** (new, `npm run storage:check`) — upload,
+  read back byte-for-byte, delete, confirm gone.
+- **`scripts/files-http-check.ts`** (new) — the browser-facing path end to end:
+  storage → `File` row → `GET /api/files/[key]` → byte comparison, then cleans up.
+
+### Two pre-existing bugs found while testing
+1. **HTML deliverables were rejected outright.** `task-outputs` did not allow
+   `text/html`, yet the runner instructs agents to upload `index.html` as
+   `text/html`. Any web-page task would have failed at upload with a 400.
+   `text/html`, `text/css` and `text/javascript` are now allowed there.
+2. **`/api/files/[key]` served active content same-origin.** It had no CSP, and
+   `image/svg+xml` was already allowed — SVG can carry `<script>`, so an agent
+   could have had a delivered file act as the site against whoever opened it.
+   The route now mirrors `/api/deliverables/[executionId]/[name]`: sandbox CSP
+   for `text/html` / `image/svg+xml` / `text/javascript`, `nosniff` on every
+   response, and `Cache-Control: private` instead of `public` (these are
+   per-user files and should not sit in shared caches).
+
+### Verified
+```
+npm run storage:check          upload / read / delete / confirm-gone   all ok
+scripts/files-http-check.ts    200, text/html, bytes identical
+curl -D -  on an .html file    content-security-policy: sandbox allow-scripts allow-forms allow-popups
+                               x-content-type-options: nosniff
+                               cache-control: private, max-age=31536000, immutable
+```
+`npx tsc --noEmit` and `npx eslint` clean; production build succeeds.
+
+### Infrastructure change made to the live Supabase project
+Four **private** buckets were created: `task-inputs` (10MB), `task-outputs`
+(20MB), `avatars` (2MB), `revision-feedback` (10MB).
+
+### Still required before an order completes on the deployment
+- **`NEXT_PUBLIC_APP_URL` must be the Vercel domain.** This is no longer
+  cosmetic: `getFileUrl()` bakes it into the URL stored in
+  `Execution.outputFiles`, so while it says `localhost:3000` every delivered file
+  link points at the reviewer's own machine.
+- **Vercel caps a serverless request body at ~4.5MB**, while `task-outputs`
+  allows 20MB. A large image delivered as multipart will be rejected by the
+  platform before the route runs. The JSON `sourceUrl` path in
+  `/api/agent-gateway/files/upload` sidesteps this but only for allowlisted
+  hosts. Not hit yet; will bite on a big image.
+- Files uploaded before this change live on a local disk and will 404. Demo data
+  only — nothing to migrate.
