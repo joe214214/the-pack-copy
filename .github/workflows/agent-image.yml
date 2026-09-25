@@ -1,0 +1,102 @@
+# Builds and publishes the customer-facing agent images.
+#
+# ONE IMAGE PER BRAIN, on purpose. A customer runs exactly one CLI, and an image
+# carrying all three measured 6.75 GB against 1.7 GB for Claude alone — four
+# times the download for tools they will never invoke.
+#
+# Published as:
+#   ghcr.io/<owner>/thepack-agent:claude-<version>   + :claude  (moving tag)
+#   ghcr.io/<owner>/thepack-agent:hermes-<version>   + :hermes
+#   ghcr.io/<owner>/thepack-agent:codex-<version>    + :codex
+#
+# The installer the dashboard generates pins the exact version tag, so a
+# customer's agent never changes under them; the moving tag is for docs.
+#
+# Trigger: push a tag like agent-v1.2.0, or run it by hand.
+name: Agent image
+
+on:
+  push:
+    tags: ["agent-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.2.0)"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        brain: [claude, hermes, codex]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # Only the selected brain is installed; the other two are switched off.
+      - name: Work out the build args
+        id: args
+        run: |
+          case "${{ matrix.brain }}" in
+            claude) echo "flags=INSTALL_CLAUDE=1
+          INSTALL_HERMES=0
+          INSTALL_CODEX=0" >> "$GITHUB_OUTPUT" ;;
+            hermes) echo "flags=INSTALL_CLAUDE=0
+          INSTALL_HERMES=1
+          INSTALL_CODEX=0" >> "$GITHUB_OUTPUT" ;;
+            codex)  echo "flags=INSTALL_CLAUDE=0
+          INSTALL_HERMES=0
+          INSTALL_CODEX=1" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Build the runner
+        working-directory: thepack-mcpb
+        run: |
+          npm ci
+          npm run build
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: thepack-mcpb
+          file: thepack-mcpb/sandbox/Dockerfile
+          push: true
+          build-args: ${{ steps.args.outputs.flags }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.v.outputs.repo }}/thepack-agent:${{ matrix.brain }}-${{ steps.v.outputs.version }}
+            ${{ env.REGISTRY }}/${{ steps.v.outputs.repo }}/thepack-agent:${{ matrix.brain }}
+          cache-from: type=gha,scope=${{ matrix.brain }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.brain }}
+
+      - name: Report the size
+        run: |
+          echo "### ${{ matrix.brain }} image published" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.REGISTRY }}/${{ steps.v.outputs.repo }}/thepack-agent:${{ matrix.brain }}-${{ steps.v.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

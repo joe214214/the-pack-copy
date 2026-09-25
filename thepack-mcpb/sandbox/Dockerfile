@@ -27,12 +27,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git curl ripgrep xz-utils build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Which brains go in ───────────────────────────────────────────────────────
+# All three default to on, which is what a developer building locally wants: one
+# image, switch AGENT_CLI freely. RELEASES ARE BUILT ONE BRAIN AT A TIME
+# (see .github/workflows/agent-image.yml) because a customer only ever uses one,
+# and carrying all three makes the image roughly 3x the download for no benefit.
+#
+#   docker build --build-arg INSTALL_HERMES=0 --build-arg INSTALL_CODEX=0 ...
+#
 # Brain #1: Claude Code CLI (headless). Selected with AGENT_CLI=claude.
-RUN npm install -g @anthropic-ai/claude-code
+ARG INSTALL_CLAUDE=1
+RUN if [ "$INSTALL_CLAUDE" = "1" ]; then npm install -g @anthropic-ai/claude-code; fi
 
 # Brain #3: OpenAI Codex CLI (AGENT_CLI=codex). Installed globally like Claude
 # — unlike Hermes it does not live in the worker home, so it can go in as root.
-# Build with --build-arg INSTALL_CODEX=0 for a leaner image.
 ARG INSTALL_CODEX=1
 RUN if [ "$INSTALL_CODEX" = "1" ]; then npm install -g @openai/codex; fi
 
@@ -57,7 +65,6 @@ ENV JOBS_DIR=/home/worker/jobs
 # because it lives in that user's home: code in ~/.hermes/hermes-agent, launcher
 # in ~/.local/bin. --skip-setup keeps the installer non-interactive; the account
 # credentials come from the owner's machine at run time (see the entrypoint).
-# Build with --build-arg INSTALL_HERMES=0 for a leaner Claude-only image.
 ARG INSTALL_HERMES=1
 RUN if [ "$INSTALL_HERMES" = "1" ]; then \
       curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup; \

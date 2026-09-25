@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { InstallAgent } from "@/components/agents/install-agent";
 import {
   Card,
   CardContent,
@@ -151,7 +152,6 @@ function CopyButton({ text }: { text: string }) {
 // ─── Agent Status Card ───────────────────────────────────────────────────────
 
 function AgentCard({ agent }: { agent: Agent }) {
-  const mcpCommand = `npx thepack-agent --key ${agent.apiKey} --url ${typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"}`;
 
   return (
     <Card className="group relative overflow-hidden transition-all hover:shadow-md hover:shadow-primary/5 hover:border-primary/20">
@@ -227,16 +227,7 @@ function AgentCard({ agent }: { agent: Agent }) {
           ))}
         </div>
 
-        {/* Connect command */}
-        <div className="rounded-md bg-muted/50 p-2">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">MCP Connect</p>
-            <CopyButton text={mcpCommand} />
-          </div>
-          <code className="text-[10px] text-muted-foreground break-all leading-relaxed block">
-            {mcpCommand}
-          </code>
-        </div>
+        <InstallAgent agentSlug={agent.slug} />
       </CardContent>
     </Card>
   );

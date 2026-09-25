@@ -2613,3 +2613,96 @@ Image check: `claude`, `hermes` and `codex` are all on PATH in
 
 `codex-home/` added to `sandbox/.gitignore` — it holds a copy of the owner's
 auth.json.
+
+---
+
+## 2026-09-25 — Packaging for customers: prebuilt per-brain images + a generated installer
+
+### What a customer had to do before
+Clone the repo (which ships them all your source), copy `.env.example` to
+`.env`, edit it in a text editor, then **build a 6.75 GB image on their own
+machine** — apt-get, three global npm installs, compiling node-pty. Minutes to
+tens of minutes, with a dozen ways to fail. The `.mcpb` bundle was no better: it
+still hardcodes `http://localhost:3000`, so it has never worked for anyone but us.
+
+### One image per brain
+Measured, and the reason for the whole split:
+
+| image | size |
+|---|---|
+| all three CLIs (what shipped before) | **6.75 GB** |
+| Claude only | **1.7 GB** |
+
+A customer runs exactly one CLI, so carrying three is four times the download
+for tools they will never invoke. The Dockerfile now has `INSTALL_CLAUDE`,
+`INSTALL_HERMES` and `INSTALL_CODEX` args, all defaulting to on (a developer
+building locally still gets one image and can switch `AGENT_CLI` freely), and
+`.github/workflows/agent-image.yml` builds the three release images one brain at
+a time and pushes them to GHCR as `thepack-agent:<brain>-<version>`.
+
+### The installer is generated per agent, per brain, per OS
+`GET /api/agents/[slug]/installer?brain=claude&platform=unix` returns a script
+with the key, the server URL, the brain and the pinned image already in it.
+Owner-only, `Cache-Control: private, no-store` — it contains a live credential.
+
+This also removed a smaller problem: the Worker Dashboard used to print the
+agent's API key into the page as a copy-paste `npx` command. That key sat in the
+DOM of a page people screenshot. Now it only ever exists inside the downloaded
+file.
+
+The dashboard component (`src/components/agents/install-agent.tsx`) makes the
+choice an explicit one: each brain states the subscription it needs, roughly
+what it costs to download, and an honest note (Codex gets told it has no
+per-tool allowlist). Claude is marked "suggested".
+
+### Where the templates live, and why
+`thepack-mcpb/release/install.{sh,ps1}.tpl` are the source; `node
+thepack-mcpb/release/build-templates.mjs` compiles them into
+`src/lib/installer/install-{sh,ps1}.ts`. A serverless deploy has no reliable
+path to files outside the app bundle, so they must be compiled in — and the
+escaping is done by a script rather than by hand because these files are full of
+the three characters a TS template literal treats specially: backslashes
+(`printf '%s\n'`), backticks (PowerShell's escape char) and `${` (every shell
+expansion). The generator is verified by round-tripping the result back through
+`eval` and diffing against the original.
+
+`src/lib/installer/brains.ts` holds the brain metadata with **no import of the
+templates**, because the dashboard renders it in the browser and those scripts
+have no business in a client bundle.
+
+### Two bugs found while building it
+1. **`/api/agents/[id]/installer` broke every agent route at runtime.**
+   `/api/agents/[slug]` already claims that path position and Next refuses two
+   different slug names at the same depth — but `next build` does not catch it,
+   only the running server does ("You cannot use different slug names for the
+   same dynamic path"). The route is addressed by slug now.
+2. The brain picker used `sm:grid-cols-3`, a viewport breakpoint, inside a card
+   about half the page wide — three options at ~140px each, every label wrapped.
+   Now `@container` + `@md:`, the same fix the order card needed.
+
+### Verified
+- Auth: 401 unauthenticated, 403 for a non-owner, 400 for an unknown brain.
+- All six variants (3 brains × 2 platforms) download 200 with the key, server
+  URL, brain and image substituted; no `{{PLACEHOLDER}}` left unfilled.
+- `sh -n` parses all three shell installers; the PowerShell parser reports 0
+  errors on all three.
+- `tsc`, `eslint` and the production build are clean.
+
+### ⚠️ Not usable by a customer until the images are published
+The installers pin `ghcr.io/joe214214/thepack-agent:<brain>`, which **does not
+exist yet**. `docker pull` will fail until the workflow runs once:
+
+```
+git tag agent-v1.0.0 && git push origin agent-v1.0.0
+```
+
+then make the GHCR packages public (GitHub → Packages → Package settings →
+Change visibility), or customers will need a registry login. Set
+`AGENT_IMAGE_REPO` and `AGENT_IMAGE_VERSION` in the web app's env to point the
+generated installers at a different registry or pin an exact release.
+
+### Open question for the business, not the code
+Every customer runs on their own Claude / Nous / OpenAI subscription. That is
+what keeps compute off your bill, but it also means **each vendor's terms on
+unattended, automated use of a personal subscription apply to your customers**,
+at your suggestion. Worth checking before this is sold.
