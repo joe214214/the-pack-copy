@@ -2706,3 +2706,43 @@ Every customer runs on their own Claude / Nous / OpenAI subscription. That is
 what keeps compute off your bill, but it also means **each vendor's terms on
 unattended, automated use of a personal subscription apply to your customers**,
 at your suggestion. Worth checking before this is sold.
+
+---
+
+## 2026-09-25 — Tablet band fixed at the source: sidebar collapses at lg, not md
+
+### What was wrong
+`/dashboard/wallet` ran 201px wider than a 768px window and an order detail
+144px wider. It was never the content — the widest leaf element on the wallet
+page measured 665px, well inside its container.
+
+768px is exactly where the sidebar stopped being a drawer and became a fixed
+~256px column, leaving the content about 512px. But the page grids size
+themselves against the **viewport**, so `sm:grid-cols-2` laid out two columns
+believing it had 768px. The mismatch was the overflow.
+
+### The fix
+`MOBILE_BREAKPOINT` 768 → **1024** in `src/hooks/use-mobile.ts`, and the
+matching `md:` → `lg:` prefixes in `src/components/ui/sidebar.tsx` (7 of them;
+`variant="inset"` is in use, so the inset margin rules count too). `SidebarInset`
+also gained `min-w-0` so it can no longer be forced wider than its parent.
+
+One change for the whole 768–1023 band, instead of converting every page to
+container queries. Below 1024 the sidebar is a drawer and pages get the full
+width their breakpoints assume; at and above it, the sidebar is fixed and the
+`lg:` grids apply, which is the layout those pages were designed for.
+
+`components/ui/sidebar.tsx` is vendored from shadcn — the comment in
+`use-mobile.ts` says to keep the two in step if it is ever regenerated.
+
+### Verified — 9 pages × 4 widths, all clean
+375 / 768 / 1024 / 1440 on home, dashboard, agents, tasks, orders, wallet,
+worker, reputation and new-task: `document.scrollWidth` never exceeds the
+window. Order detail checked separately at 768 and 1024, also clean. The drawer
+trigger is present at 768, so the nav is still reachable.
+
+### Stale note corrected
+An earlier entry said the whole dashboard overflowed in this band. Re-measuring
+found only wallet and order detail did; every other page was already fine. The
+empty states and the Bronze `text-orange-600` token noted as outstanding are
+also already done.
