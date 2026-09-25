@@ -9,18 +9,21 @@
  * Loop:
  *   1. Send a heartbeat (keeps the agent online).
  *   2. Poll GET /api/agent-gateway/jobs for work the website dispatched.
- *   3. When there is work, launch a headless `claude` (your local Claude Code)
- *      with the ThePack MCP tools wired in, and let it run the full job loop:
+ *   3. When there is work, launch the configured agent CLI headless with the
+ *      ThePack MCP tools wired in, and let it run the full job loop:
  *      whoami -> set_task_plan -> work + report_progress per step -> submit_result.
  *   4. Repeat.
  *
- * The "brain" is your own Claude Code (no separate API key, no extra cost).
+ * The "brain" is whichever CLI AGENT_CLI names — claude (default), hermes or
+ * codex — running on the owner's own login, so there is no separate API key.
  *
  * Usage:
  *   node dist/runner.js -k <agent_api_key> [-s http://localhost:3000] [-i 15]
  *
- * Requires the `claude` CLI on PATH. Set RUNNER_BYPASS=1 to use
- * --dangerously-skip-permissions instead of an explicit tool allowlist.
+ * Requires that CLI on PATH. Set RUNNER_BYPASS=1 to declare that something
+ * outside already confines this process (the sandbox container does), which
+ * lets each CLI drop its own permission layer: Claude skips its prompts,
+ * Codex defers its sandbox to the container.
  */
 import { Command } from "commander";
 import { spawn } from "node:child_process";
@@ -54,17 +57,29 @@ const pollMs = Math.max(5, parseInt(opts.interval, 10) || 15) * 1000;
 // ── Which agent CLI is the brain ─────────────────────────────────────────────
 // The runner is CLI-agnostic: everything after the job is picked up (plan,
 // progress, delivery) goes through the ThePack MCP tools, so swapping the brain
-// only changes how we launch it. Both CLIs offer the two things this needs: a
+// only changes how we launch it. Each CLI offers the two things this needs: a
 // headless one-shot mode, and MCP so our tools are callable.
 //
 //   claude  -> `claude -p`      (Anthropic Claude Code)
 //   hermes  -> `hermes -z`      (Nous Hermes Agent)
+//   codex   -> `codex exec`     (OpenAI Codex CLI)
 //
-// Set AGENT_CLI in the sandbox .env. HERMES_BIN overrides the executable path
-// when `hermes` is not on PATH.
+// They differ in two ways that matter here:
+//   · how the prompt arrives — Claude and Codex read stdin, Hermes takes argv.
+//   · where MCP servers live — Claude takes a per-invocation --mcp-config,
+//     while Hermes and Codex keep a persistent config we register into once
+//     at startup.
+//
+// Set AGENT_CLI in the sandbox .env. HERMES_BIN / CODEX_BIN override the
+// executable path when the CLI is not on PATH under its own name.
 const AGENT_CLI = (process.env.AGENT_CLI || "claude").trim().toLowerCase();
 const IS_HERMES = AGENT_CLI === "hermes";
+const IS_CODEX = AGENT_CLI === "codex";
+const IS_CLAUDE = !IS_HERMES && !IS_CODEX;
 const HERMES_BIN = (process.env.HERMES_BIN || "hermes").trim();
+const CODEX_BIN = (process.env.CODEX_BIN || "codex").trim();
+/** How the brain is named in log lines the owner reads. */
+const BRAIN_LABEL = IS_HERMES ? "Hermes" : IS_CODEX ? "Codex" : "Claude";
 const THEPACK_TOOLS = [
     "mcp__thepack__whoami",
     "mcp__thepack__get_assigned_jobs",
@@ -127,9 +142,20 @@ function log(msg) {
 // Run a command to completion, returning its exit code. Used for the small
 // setup/discovery commands (never for the agent run itself, which needs the
 // watchdog and streaming in runAgent()).
+/** Quote one argv entry for a Windows shell. Paths here contain spaces. */
+function winQuote(a) {
+    return /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a;
+}
 function run(cmd, args, stdin = "", timeoutMs = 120_000) {
     return new Promise((resolve) => {
-        const child = spawn(cmd, args, { shell: false });
+        // On Windows an npm-installed CLI is a .cmd shim, which spawn() cannot
+        // resolve without a shell — it fails with ENOENT, which surfaced here as a
+        // silent "could not register the MCP server". So go through a shell there
+        // and do the quoting ourselves. Same reason the Claude branch of runAgent()
+        // uses shell:true.
+        const child = process.platform === "win32"
+            ? spawn(`${cmd} ${args.map(winQuote).join(" ")}`, { shell: true })
+            : spawn(cmd, args, { shell: false });
         const timer = setTimeout(() => {
             try {
                 child.kill("SIGKILL");
@@ -158,6 +184,20 @@ async function ensureHermesMcp() {
     log(code === 0
         ? "ThePack MCP server registered with Hermes."
         : `WARNING: could not register the ThePack MCP server with Hermes (exit ${code}). The agent will not be able to fetch or submit jobs.`);
+}
+// Codex also keeps MCP servers in a persistent config (~/.codex/config.toml)
+// rather than accepting a per-invocation file, so the same remove-then-add
+// dance applies. Unlike Hermes it is fully non-interactive — no tool-enable
+// prompt to answer — and the launch command goes after a literal `--`.
+async function ensureCodexMcp() {
+    await run(CODEX_BIN, ["mcp", "remove", "thepack"]); // may not exist — ignore
+    const code = await run(CODEX_BIN, [
+        "mcp", "add", "thepack",
+        "--", "node", mcpEntry, "-k", agentKey, "-s", serverUrl,
+    ]);
+    log(code === 0
+        ? "ThePack MCP server registered with Codex."
+        : `WARNING: could not register the ThePack MCP server with Codex (exit ${code}). The agent will not be able to fetch or submit jobs.`);
 }
 async function api(endpoint, init) {
     const res = await fetch(`${serverUrl}${endpoint}`, {
@@ -266,6 +306,48 @@ function hermesCommand(workDir) {
     args.push("--usage-file", path.join(workDir, "usage.json"));
     return { cmd: HERMES_BIN, args };
 }
+// How to launch the OpenAI Codex CLI for one job. Like Claude it reads the
+// instruction from stdin, so nothing here has to carry the prompt.
+function codexCommand(workDir) {
+    const args = ["exec"];
+    // Codex expects to be pointed at a repo and refuses to start outside one.
+    // A job's scratch directory is a bare temp dir, so say so explicitly.
+    args.push("--skip-git-repo-check");
+    // Do not leave a session file in CODEX_HOME for every job. We never resume.
+    args.push("--ephemeral");
+    // Run with the job's scratch directory as the workspace root, matching the
+    // `cwd` the other two CLIs get.
+    args.push("-C", workDir);
+    // Left unset on purpose by default. A Codex signed in with a ChatGPT
+    // subscription refuses EVERY explicit model with "The '<name>' model is not
+    // supported when using Codex with a ChatGPT account" — measured against
+    // gpt-5.5, gpt-5, gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.2-codex,
+    // gpt-5-codex, o4-mini and codex-mini-latest, all rejected. Such an account
+    // must run on whatever default the CLI picks. CODEX_MODEL is here for an
+    // API-key account, which can choose.
+    const model = (process.env.CODEX_MODEL || "").trim();
+    if (model)
+        args.push("-m", model);
+    // Codex sandboxes the commands the model runs. Inside our container that is
+    // a sandbox within a sandbox: the box already confines the whole process, and
+    // Codex's own layer blocks the file and network access a real job needs. So
+    // when the box has declared itself the boundary (RUNNER_BYPASS=1, set by
+    // docker-compose) we hand Codex the flag that defers to it — which is exactly
+    // the case its own help text describes as "intended solely for running in
+    // environments that are externally sandboxed".
+    //
+    // On bare metal there is no such boundary, so Codex keeps its own:
+    // --approve-for-me auto-reviews approval requests instead of waiting on a
+    // human who is not there, and already implies the workspace-write sandbox —
+    // passing -s alongside it is rejected as a conflicting argument.
+    if (process.env.RUNNER_BYPASS === "1") {
+        args.push("--dangerously-bypass-approvals-and-sandbox");
+    }
+    else {
+        args.push("--approve-for-me");
+    }
+    return { cmd: CODEX_BIN, args };
+}
 function runAgent() {
     return new Promise((resolve) => {
         // Per-run scratch space, created first because the Hermes command line
@@ -292,6 +374,25 @@ function runAgent() {
             // pass argv straight through: no quoting rules to get wrong.
             const { cmd, args } = hermesCommand(workDir);
             child = spawn(cmd, args, { shell: false, cwd: workDir, detached: !isWin });
+        }
+        else if (IS_CODEX) {
+            // Codex reads the prompt from stdin, so argv carries only flags and can
+            // go across without a shell — same reasoning as Hermes.
+            //
+            // No tool allowlist is passed because Codex has no equivalent of Claude's
+            // --allowedTools: its MCP servers are all-or-nothing from its own config.
+            // The container is therefore the only isolation boundary under Codex; see
+            // the banner at startup, which says so out loud.
+            const { cmd, args } = codexCommand(workDir);
+            // On Windows the CLI is a .cmd shim that only a shell can resolve. Safe
+            // to route through one here because argv carries flags only — the
+            // multi-KB prompt goes over stdin and never meets a quoting rule.
+            child = isWin
+                ? spawn(`${cmd} ${args.map(winQuote).join(" ")}`, {
+                    shell: true,
+                    cwd: workDir,
+                })
+                : spawn(cmd, args, { shell: false, cwd: workDir, detached: true });
         }
         else {
             const args = ["-p", "--mcp-config", cfgPath, "--output-format", "text"];
@@ -358,23 +459,26 @@ function runAgent() {
             }
             finish();
         }, timeoutMs);
-        // Claude reads the instruction from stdin; Hermes already has it in argv.
+        // Claude and Codex read the instruction from stdin; Hermes already has it
+        // in argv.
         if (!IS_HERMES)
             child.stdin.write(WORK_PROMPT);
         child.stdin.end();
+        const binName = IS_HERMES ? HERMES_BIN : IS_CODEX ? CODEX_BIN : "claude";
         child.stdout.on("data", (d) => process.stdout.write(d));
         child.stderr.on("data", (d) => process.stderr.write(d));
         child.on("close", (code) => finish(`${AGENT_CLI} finished (exit ${code})`));
-        child.on("error", (e) => finish(`failed to launch ${AGENT_CLI}: ${e.message}. Is the '${IS_HERMES ? HERMES_BIN : "claude"}' CLI on PATH?`));
+        child.on("error", (e) => finish(`failed to launch ${AGENT_CLI}: ${e.message}. Is the '${binName}' CLI on PATH?`));
     });
 }
 async function tick() {
     // Periodically (startup + every 5 min) re-discover the account's connectors
     // and piggyback them on the heartbeat so the website checklist stays fresh.
     // Connectors are a claude.ai account concept, so this only applies when Claude
-    // is the brain; Hermes gets its tools from its own MCP registrations instead.
+    // is the brain; Hermes and Codex get their tools from their own MCP
+    // registrations instead.
     let discovered;
-    if (!IS_HERMES && Date.now() - lastDiscoveryAt > DISCOVER_EVERY_MS) {
+    if (IS_CLAUDE && Date.now() - lastDiscoveryAt > DISCOVER_EVERY_MS) {
         lastDiscoveryAt = Date.now();
         discovered = await discoverConnectors();
         log(`connectors on this Claude account: ${discovered.length ? discovered.join(", ") : "none found"}`);
@@ -394,11 +498,11 @@ async function tick() {
         const data = await api("/api/agent-gateway/jobs");
         const count = data.count ?? (data.jobs?.length || 0);
         if (count > 0) {
-            log(`${count} job(s) dispatched — handing off to local ${IS_HERMES ? "Hermes" : "Claude"}…`);
+            log(`${count} job(s) dispatched — handing off to local ${BRAIN_LABEL}…`);
             busy = true;
             // Re-read the owner's approved connectors so a change on the website takes
             // effect on the next job without restarting the runner.
-            if (!IS_HERMES)
+            if (IS_CLAUDE)
                 await refreshApprovedConnectors();
             await runAgent();
             busy = false;
@@ -413,15 +517,27 @@ log(`ThePack runner started. server=${serverUrl} poll=${pollMs / 1000}s`);
 if (IS_HERMES) {
     log(`Brain: local '${HERMES_BIN}' CLI (Nous Hermes Agent), model=${process.env.HERMES_MODEL?.trim() || "config default"}${process.env.HERMES_PROVIDER ? ` provider=${process.env.HERMES_PROVIDER.trim()}` : ""} (one-shot mode; approvals auto-bypassed).`);
 }
+else if (IS_CODEX) {
+    const externallySandboxed = process.env.RUNNER_BYPASS === "1";
+    log(`Brain: local '${CODEX_BIN}' CLI (OpenAI Codex), model=${process.env.CODEX_MODEL?.trim() || "account default"} (${externallySandboxed ? "deferring to the container for isolation" : "workspace-write sandbox, approvals auto-reviewed"}).`);
+    // Say this plainly rather than leaving it to be discovered: under Claude the
+    // --allowedTools list keeps un-approved account connectors uninvokable even
+    // when they load. Codex has no per-tool allowlist, so whatever is registered
+    // in its config is callable and the container is the only wall.
+    log("Note: Codex has no per-tool allowlist, so connector approval is not enforced at the tool level — isolation comes from the sandbox container.");
+}
 else {
     log(`Brain: local 'claude' CLI, model=${process.env.CLAUDE_MODEL?.trim() || "account default"} (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "local tools + ThePack tools"}; connectors gated by owner approval).`);
 }
 log("Leave this running. Assign tasks to this agent on the website — they'll be handled automatically.");
-// Hermes needs the ThePack MCP server registered in its own config before the
-// first job; Claude gets the same wiring per-run via --mcp-config.
+// Hermes and Codex both need the ThePack MCP server written into their own
+// persistent config before the first job; Claude gets the same wiring per-run
+// via --mcp-config.
 async function start() {
     if (IS_HERMES)
         await ensureHermesMcp();
+    else if (IS_CODEX)
+        await ensureCodexMcp();
     else
         void refreshApprovedConnectors();
     void tick();

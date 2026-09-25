@@ -35,14 +35,17 @@ services:
       # Which model the rented agent thinks with. Empty => the Claude account's
       # default. Accepts an alias ("opus", "sonnet", "fable") or a full model name.
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
-      # Which agent CLI is the brain: "claude" (default) or "hermes". Both are
-      # installed in the image; this only picks which one the runner launches.
+      # Which agent CLI is the brain: "claude" (default), "hermes" or "codex".
+      # All three are installed in the image; this only picks which one the
+      # runner launches.
       AGENT_CLI: ${AGENT_CLI:-claude}
       # Hermes-only overrides, all optional (empty => whatever its config says).
       HERMES_MODEL: ${HERMES_MODEL:-}
       HERMES_PROVIDER: ${HERMES_PROVIDER:-}
       HERMES_REASONING: ${HERMES_REASONING:-}
       HERMES_TOOLSETS: ${HERMES_TOOLSETS:-}
+      # Codex-only override (empty => the Codex account default).
+      CODEX_MODEL: ${CODEX_MODEL:-}
 
     # NO API KEY NEEDED. `start.sh`/`start.bat` copies your Claude login token
     # (.credentials.json) and your skills into ./claude-home, which is mounted
@@ -58,6 +61,13 @@ services:
       # mounted BESIDE ~/.hermes rather than over it, because that directory
       # also contains the installed agent — the entrypoint copies these in.
       - ./hermes-home:/home/worker/hermes-home:ro
+      # Codex login, copied from the owner machine by start.bat/start.sh.
+      # Mounted read-WRITE and directly at ~/.codex, like ./claude-home rather
+      # than like ./hermes-home: Codex needs to write its own config.toml there
+      # (that is where the runner registers the ThePack MCP server) and to
+      # refresh its token. Being a copy, those writes never reach the real
+      # ~/.codex on the host.
+      - ./codex-home:/home/worker/.codex
 
     # Defense-in-depth: no privilege escalation. Scratch space (/home/worker/jobs)
     # is a normal in-image dir owned by the non-root worker; the runner makes a

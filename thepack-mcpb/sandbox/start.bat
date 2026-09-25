@@ -43,6 +43,22 @@ if exist "%HOST_HERMES%\auth.json" (
   echo No Hermes login found at %HOST_HERMES% - that is only needed if you set AGENT_CLI=hermes.
 )
 
+REM Same idea for the third brain: copy the Codex login so AGENT_CLI=codex can
+REM run on your Codex subscription. Only auth.json is copied - NOT the host
+REM config.toml, whose MCP servers point at Windows paths that do not exist in
+REM the box. Codex writes its own config.toml (including the ThePack MCP
+REM registration the runner makes at startup) into this copy, so the mount is
+REM read-write and your real .codex is never touched. codex-home is gitignored.
+set "HOST_CODEX=%CODEX_HOME%"
+if "%HOST_CODEX%"=="" set "HOST_CODEX=%USERPROFILE%\.codex"
+if not exist codex-home mkdir codex-home
+if exist "%HOST_CODEX%\auth.json" (
+  copy /Y "%HOST_CODEX%\auth.json" codex-home\auth.json >nul
+  echo Reusing your Codex login from %HOST_CODEX%.
+) else (
+  echo No Codex login found at %HOST_CODEX% - that is only needed if you set AGENT_CLI=codex.
+)
+
 REM Pass "hardened" to add the egress-allowlist network wall.
 if "%1"=="hardened" (
   echo Building and starting the sealed sandbox ^(HARDENED: egress allowlist^)...

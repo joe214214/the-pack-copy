@@ -30,6 +30,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Brain #1: Claude Code CLI (headless). Selected with AGENT_CLI=claude.
 RUN npm install -g @anthropic-ai/claude-code
 
+# Brain #3: OpenAI Codex CLI (AGENT_CLI=codex). Installed globally like Claude
+# — unlike Hermes it does not live in the worker home, so it can go in as root.
+# Build with --build-arg INSTALL_CODEX=0 for a leaner image.
+ARG INSTALL_CODEX=1
+RUN if [ "$INSTALL_CODEX" = "1" ]; then npm install -g @openai/codex; fi
+
 # Non-root worker — the sandboxed agent never runs as root.
 RUN useradd -m -u 10001 worker
 WORKDIR /home/worker/app
@@ -42,7 +48,7 @@ COPY dist ./dist
 # Per-job scratch space (mounted as tmpfs at run time). The only host mount is
 # ./claude-home -> /home/worker/.claude (a COPY of your Claude login + skills),
 # so the boxed Claude runs on your subscription — no API key required.
-RUN mkdir -p /home/worker/jobs /home/worker/.claude && chown -R worker:worker /home/worker
+RUN mkdir -p /home/worker/jobs /home/worker/.claude /home/worker/.codex && chown -R worker:worker /home/worker
 USER worker
 ENV HOME=/home/worker
 ENV JOBS_DIR=/home/worker/jobs
@@ -70,8 +76,16 @@ ENV RUNNER_BYPASS=1
 #                                   login via the mounted ./claude-home; set this
 #                                   only if there is no Claude login to reuse.
 #   POLL_INTERVAL       (optional)  seconds, default 15
-#   AGENT_CLI           (optional)  "claude" (default) or "hermes"
+#   AGENT_CLI           (optional)  "claude" (default), "hermes" or "codex"
 #   HERMES_MODEL        (optional)  model override when AGENT_CLI=hermes
+#   CODEX_MODEL         (optional)  model override when AGENT_CLI=codex
+#
+# Codex reads its login from CODEX_HOME (~/.codex by default). ./codex-home is
+# mounted there read-write, the same arrangement as ./claude-home: it holds a
+# COPY of the owner auth.json, and Codex writes its own config.toml — including
+# the ThePack MCP registration the runner makes at startup — into that copy. The
+# host config.toml is deliberately NOT copied in, because its MCP servers point
+# at Windows paths that do not exist in the box.
 #
 # Hermes keeps its credentials and config inside ~/.hermes, which also holds the
 # installed agent itself — so that directory cannot simply be mounted over the

@@ -2532,3 +2532,84 @@ count, where the mock said 48). Alex, who owns no agent: Total **Spent** $270,
 four real orders. Marco, who owns Claude 1: Total **Earned** $281.70. Platform
 row showed a real 24.3 min average over the last 50 completed executions. The
 probe account was deleted afterwards. 1440px clean; tsc, eslint and build clean.
+
+---
+
+## 2026-09-25 — Codex added as a third agent CLI, at parity with Claude and Hermes
+
+`AGENT_CLI=codex` now runs jobs through the OpenAI Codex CLI. Nothing about the
+job loop changed: plan, progress and delivery still go through the ThePack MCP
+tools, so the brain is the only swappable part.
+
+### How the three differ, which is all the runner had to absorb
+| | prompt arrives via | MCP config |
+|---|---|---|
+| `claude -p` | stdin | per-invocation `--mcp-config` |
+| `hermes -z` | argv | persistent, registered at startup |
+| `codex exec` | **stdin** | **persistent, registered at startup** |
+
+So Codex borrows Claude's stdin handling and Hermes' startup registration.
+`ensureCodexMcp()` mirrors `ensureHermesMcp()` — remove-then-add for
+idempotence — except `codex mcp add` is fully non-interactive (no tool-enable
+prompt to answer) and takes the launch command after a literal `--`.
+
+### Launch flags, and why each is there
+`codex exec --skip-git-repo-check --ephemeral -C <workDir>` plus:
+- `--skip-git-repo-check` — a job's scratch dir is not a git checkout and Codex
+  otherwise refuses to start.
+- `--ephemeral` — no session file per job in CODEX_HOME. We never resume.
+- `RUNNER_BYPASS=1` (the container sets it) →
+  `--dangerously-bypass-approvals-and-sandbox`. Codex sandboxes the commands the
+  model runs, which inside our container is a sandbox within a sandbox and
+  blocks the file and network access a real job needs. That flag's own help text
+  describes this exact case: "intended solely for running in environments that
+  are externally sandboxed."
+- Bare metal → `--approve-for-me` alone. It auto-reviews approvals instead of
+  waiting on a human who is not there, and **already implies workspace-write —
+  passing `-s` alongside it is rejected as a conflicting argument** (cost one
+  debugging round).
+
+### Two things measured, not assumed
+1. **A ChatGPT-subscription Codex cannot pick a model.** Every explicit `-m` is
+   refused with "The '<name>' model is not supported when using Codex with a
+   ChatGPT account" — verified against gpt-5.5, gpt-5, gpt-5.1, gpt-5.1-codex,
+   gpt-5.1-codex-max, gpt-5.2-codex, gpt-5-codex, o4-mini and codex-mini-latest.
+   `CODEX_MODEL` therefore stays **empty** on such an account; it exists for an
+   API-key account. `.env.example` says so.
+2. **The host `~/.codex/config.toml` pins `model = "gpt-5.5"`, which this
+   account has no access to** ("does not exist or you do not have access").
+   Running with `--ignore-user-config` fell back to the built-in default
+   (`gpt-6-luna`) and worked. This is why `start.sh`/`start.bat` copy **only
+   auth.json** into `./codex-home` and deliberately not config.toml — the
+   container then gets a fresh config holding just the ThePack MCP registration,
+   and no unusable model pin. Copying config.toml would also have dragged in MCP
+   servers pointing at Windows paths.
+
+   Consequence for **bare-metal** runs on this machine: `AGENT_CLI=codex` will
+   fail on the model until that config.toml line is changed or removed. The
+   sandbox is unaffected.
+
+### Windows portability bug found and fixed along the way
+`run()` spawned with `shell: false`. On Windows an npm-installed CLI is a `.cmd`
+shim that only a shell can resolve, so the spawn failed with ENOENT and surfaced
+as a silent "could not register the MCP server". It now goes through a shell on
+Windows with its own quoting (paths in this repo contain spaces). **This was
+latent for Hermes too** — `ensureHermesMcp()` uses the same helper and would
+have failed identically on a Windows host; it had only ever run inside the Linux
+container. The Codex branch of `runAgent()` does the same, which is safe because
+its argv carries flags only — the multi-KB prompt goes over stdin.
+
+### Verified end to end, twice, against the live deployment
+| | host (CODEX_HOME simulating the box) | inside the container |
+|---|---|---|
+| duration | 78s | 68s |
+| work plan | 3/3 reported | 3/3 reported |
+| deliverable | `index.html` on Supabase, production URL | same |
+| auto-review | passed | passed 100% |
+| exit | 0 | 0 |
+
+Image check: `claude`, `hermes` and `codex` are all on PATH in
+`thepack/sandbox-runner` (codex-cli 0.157.0).
+
+`codex-home/` added to `sandbox/.gitignore` — it holds a copy of the owner's
+auth.json.

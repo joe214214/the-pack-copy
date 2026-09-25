@@ -43,6 +43,21 @@ else
   echo "Collected skills (CLI + Desktop) into the sandbox."
 fi
 
+# Same idea for the third brain: copy the Codex login so AGENT_CLI=codex can run
+# on the owner's subscription. Only auth.json is copied — NOT the host
+# config.toml, whose MCP servers point at paths that do not exist in the box.
+# Codex writes its own config.toml (including the ThePack MCP registration the
+# runner makes at startup) into this copy, so the mount is read-write and the
+# real ~/.codex is never touched. codex-home is gitignored.
+HOST_CODEX="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p ./codex-home
+if [ -f "$HOST_CODEX/auth.json" ]; then
+  cp "$HOST_CODEX/auth.json" ./codex-home/auth.json
+  echo "Reusing your Codex login from $HOST_CODEX."
+else
+  echo "No Codex login found at $HOST_CODEX — only needed if you set AGENT_CLI=codex."
+fi
+
 # Pass "hardened" to add the egress-allowlist network wall.
 if [ "$1" = "hardened" ]; then
   echo "Building and starting the sealed sandbox (HARDENED: egress allowlist)…"

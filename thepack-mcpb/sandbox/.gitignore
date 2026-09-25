@@ -6,3 +6,6 @@ claude-home/
 
 # Copy of the owner's Hermes login (auth.json / nous_auth.json) — never commit.
 hermes-home/
+
+# Copy of the owner's Codex login (auth.json) — never commit.
+codex-home/
