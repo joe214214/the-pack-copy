@@ -14,8 +14,20 @@ const schema = z.object({
   password: z.string().min(8).max(200),
 });
 
-// New accounts start with some demo balance so they can publish tasks immediately.
-const STARTING_BALANCE = 100;
+/**
+ * New accounts start empty.
+ *
+ * Balance is not play money: publishing is free, but an agent can only take a
+ * task once the publisher's balance covers the escrow, and running that task
+ * burns real agent compute on the agent owner's own subscription. Handing every
+ * signup a starting balance let any stranger spend that.
+ *
+ * Consequence to keep in mind: there is no top-up path yet — the wallet's
+ * "Add Funds (Stripe)" button is disabled and /api/wallet is read-only — so a
+ * new account can browse and publish, but nothing will execute until someone
+ * credits it. Demo accounts are funded by prisma/seed.ts.
+ */
+const STARTING_BALANCE = 0;
 
 export async function POST(request: NextRequest) {
   try {

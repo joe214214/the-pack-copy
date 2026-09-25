@@ -2476,3 +2476,59 @@ sidebar expands at `md` while `main` is still `w-full`. `/dashboard/wallet`
 element inside `main` on the order page is 583px — nothing in the content is
 oversized, the layout arithmetic is. `/dashboard/agents` and `/dashboard/tasks`
 are fine. Both 375px and 1440px are clean everywhere. Needs its own pass.
+
+---
+
+## 2026-09-25 — Real dashboard data, and new accounts no longer get free credit
+
+### New accounts start at zero balance
+`src/app/api/auth/register/route.ts` — `STARTING_BALANCE` 100 → **0**.
+
+Registration was already real (it writes a `User` row with a hashed password);
+the giveaway was the starting balance. Balance is not play money: publishing is
+free, but `/api/tasks/[id]/assign` checks the publisher's balance before
+escrowing, and the task that follows burns real agent compute on the agent
+owner's own Claude/Hermes subscription. $100 per signup was a stranger's budget
+to spend on that.
+
+**Consequence, on purpose but worth knowing:** there is no top-up path. The
+wallet's "Add Funds (Stripe)" button is `disabled` and `/api/wallet/[userId]` is
+GET-only, so a new account can browse and publish, but no agent can take its
+tasks until someone credits it. The escrow check fails with "Publisher has
+insufficient balance to fund this task". Demo accounts are funded by
+`prisma/seed.ts`. If self-serve signups ever need to work end to end, an admin
+credit endpoint or a real payment flow is the missing piece.
+
+### The dashboard was entirely fabricated
+`src/app/dashboard/page.tsx` shipped three blocks of invented data: the four
+stat cards (12 / 48 / 7 / $3,240), four made-up orders with fake IDs, and a
+"Platform Activity" panel reading 247 tasks today, 48 agents online, 4.2 min
+average, 96.8% satisfaction. Plausible numbers are worse than obviously-fake
+ones — a brand-new account opened on somebody else's imaginary activity.
+
+- **`src/app/api/dashboard/route.ts`** (new) — one query batch for the whole
+  page. User-scoped where it should be (their tasks, their orders, their
+  spend), marketplace-wide where that is the point (agents available, platform
+  activity).
+- **`src/app/dashboard/page.tsx`** — fetches it; adds a loading state and an
+  empty state for Recent Orders.
+
+Judgement calls worth keeping:
+- The fourth card **adapts**: "Total Earned" for someone who owns an agent,
+  "Total Spent" otherwise. A publisher-only account can never earn, so a
+  permanent "Total Earned $0" is noise.
+- Satisfaction rate is **null until somebody has actually accepted or rejected
+  a delivery**, and renders "no reviews yet". A percentage computed off zero
+  reviews is a lie, and 100% off one review is nearly as bad.
+- "Agents online now" uses a **2-minute heartbeat window**, not the `isOnline`
+  flag, which goes stale when a runner is killed without shutting down.
+- The subtitle no longer says "Welcome back" to an account that has never been
+  here.
+
+### Verified
+A throwaway account registered against the live database came back with
+`balance: 0` and a dashboard of real zeros (`availableAgents: 2`, the true
+count, where the mock said 48). Alex, who owns no agent: Total **Spent** $270,
+four real orders. Marco, who owns Claude 1: Total **Earned** $281.70. Platform
+row showed a real 24.3 min average over the last 50 completed executions. The
+probe account was deleted afterwards. 1440px clean; tsc, eslint and build clean.
