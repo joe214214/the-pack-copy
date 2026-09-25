@@ -7,17 +7,18 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";
+import {
+  DeliverableFiles,
+  type DeliverableFile,
+} from "@/components/orders/deliverable-files";
 import { CreditTierBadge } from "@/components/agents/credit-tier-badge";
 import { getTaskType } from "@/lib/task-types";
 import {
-  ArrowLeft, Bot, CheckCircle2, Clock, DollarSign, FileText,
+  ArrowLeft, Bot, CheckCircle2, Clock, FileText,
   Loader2, ShoppingCart, Star, AlertTriangle, Zap,
-  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, ImageIcon, Download, ExternalLink, RotateCcw, ChevronDown, ChevronUp, Plus,
+  CheckCheck, XCircle, Timer, Play, Trophy, Wifi, RotateCcw, Plus,
 } from "lucide-react";
 
-// File types the browser can render in a tab, so we offer an "Open / preview"
-// link (not just download) — e.g. an agent-delivered self-contained web page.
-const PREVIEWABLE = /\.(html?|svg|pdf|txt|md|json|csv)$/i;
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
@@ -85,6 +86,20 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OrderDetail = any;
+
+/**
+ * One row of revision history. `previousFiles` is the snapshot of what that
+ * round delivered, taken when the publisher asked for changes — each new round
+ * overwrites execution.outputFiles, so this is the only copy left.
+ */
+interface RevisionEntry {
+  id: string;
+  round: number;
+  feedback: string;
+  previousScore?: number | null;
+  previousFiles?: DeliverableFile[] | null;
+  createdAt: string;
+}
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -470,110 +485,19 @@ export default function OrderDetailPage() {
                   Delivered Files
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {(() => {
-                  const files = order.execution.outputFiles as any[];
-                  const imageFiles = files.filter((f: any) =>
-                    f.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(f.name)
-                  );
-                  const otherFiles = files.filter((f: any) =>
-                    !f.type?.startsWith("image/") && !/\.(png|jpe?g|webp|gif)$/i.test(f.name)
-                  );
-                  return (
-                    <>
-                      {/* Image grid */}
-                      {imageFiles.length > 0 && (
-                        <div className="grid grid-cols-2 gap-2">
-                          {imageFiles.map((file: any, i: number) => (
-                            <a
-                              key={i}
-                              href={file.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="group relative aspect-video overflow-hidden rounded-lg border bg-muted hover:border-primary/50 transition-colors"
-                            >
-                              <img
-                                src={file.url}
-                                alt={file.name}
-                                className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                              />
-                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <p className="text-xs text-white truncate">{file.name}</p>
-                                <p className="text-xs text-white/70">{(file.size / 1024).toFixed(1)} KB</p>
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                      {/* Other files list */}
-                      {otherFiles.map((file: any, i: number) => {
-                        const isHtml =
-                          file.type === "text/html" || /\.html?$/i.test(file.name || "");
-                        const previewable =
-                          isHtml ||
-                          file.type?.startsWith("text/") ||
-                          file.type === "application/pdf" ||
-                          PREVIEWABLE.test(file.name || "");
-                        // Inline deliverables are stored as data: URLs, which a
-                        // browser will not open as a top-level navigation. Route
-                        // them through the server so "open" really opens the page
-                        // in its own tab (served under a sandbox CSP).
-                        const openUrl =
-                          order.execution?.id && file.name
-                            ? `/api/deliverables/${order.execution.id}/${encodeURIComponent(file.name)}`
-                            : file.url;
-                        return (
-                          <div key={i} className="space-y-2">
-                            <div className="flex items-center gap-3 rounded-lg border p-3">
-                              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                              <span className="text-sm font-medium flex-1 truncate">{file.name}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {(file.size / 1024).toFixed(1)} KB
-                              </span>
-                              {isHtml && (
-                                <a
-                                  href={openUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title="Open this page in a new tab"
-                                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10"
-                                >
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                  Open
-                                </a>
-                              )}
-                              {previewable && !isHtml && (
-                                <a
-                                  href={openUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title="Open in a new tab"
-                                >
-                                  <ExternalLink className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                                </a>
-                              )}
-                              <a href={file.url} download={file.name} title="Download">
-                                <Download className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                              </a>
-                            </div>
-                            {/* Live preview of a delivered web page. Sandboxed
-                                (allow-scripts, no allow-same-origin) → the page's
-                                JS runs but can't touch this site's cookies/DOM. */}
-                            {isHtml && (
-                              <iframe
-                                src={openUrl}
-                                title={`Preview of ${file.name}`}
-                                sandbox="allow-scripts"
-                                className="w-full h-96 rounded-lg border bg-white"
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
+              <CardContent>
+                {/* Inline deliverables are stored as data: URLs, which a browser
+                    will not open as a top-level navigation. Route them through
+                    the server so "open" really opens the page in its own tab
+                    (served under a sandbox CSP). */}
+                <DeliverableFiles
+                  files={order.execution.outputFiles as DeliverableFile[]}
+                  openUrlFor={(file) =>
+                    order.execution?.id && file.name
+                      ? `/api/deliverables/${order.execution.id}/${encodeURIComponent(file.name)}`
+                      : undefined
+                  }
+                />
               </CardContent>
             </Card>
           )}
@@ -715,9 +639,10 @@ export default function OrderDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {(order.revisions as any[])
-                  .sort((a: any, b: any) => b.round - a.round)
-                  .map((rev: any) => (
+                {(order.revisions as RevisionEntry[])
+                  .slice()
+                  .sort((a, b) => b.round - a.round)
+                  .map((rev) => (
                     <div
                       key={rev.id}
                       className="p-3 rounded-lg bg-zinc-800/50 border border-zinc-700/50 space-y-1"
@@ -739,6 +664,30 @@ export default function OrderDetailPage() {
                           timeStyle: "short",
                         })}
                       </p>
+
+                      {/* What that round actually delivered. Each new round
+                          overwrites execution.outputFiles, so without this
+                          snapshot the earlier version is gone from the page and
+                          there is nothing to compare the rewrite against.
+                          Served by id through /api/revisions/... because every
+                          round tends to deliver the same filename. */}
+                      {Array.isArray(rev.previousFiles) &&
+                        rev.previousFiles.length > 0 && (
+                          <div className="space-y-2 pt-2">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              Delivered in round {rev.round}
+                            </p>
+                            <DeliverableFiles
+                              compact
+                              files={rev.previousFiles as DeliverableFile[]}
+                              openUrlFor={(file) =>
+                                file.name
+                                  ? `/api/revisions/${rev.id}/${encodeURIComponent(file.name)}`
+                                  : undefined
+                              }
+                            />
+                          </div>
+                        )}
                     </div>
                   ))}
               </CardContent>

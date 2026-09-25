@@ -2410,3 +2410,69 @@ Four **private** buckets were created: `task-inputs` (10MB), `task-outputs`
   hosts. Not hit yet; will bite on a big image.
 - Files uploaded before this change live on a local disk and will 404. Demo data
   only — nothing to migrate.
+
+---
+
+## 2026-09-25 — Revision history shows what each round delivered
+
+### The gap
+Asking for changes overwrote the delivery. Each new round replaces
+`execution.outputFiles`, `taskPlan` and `logs` in place, so the page only ever
+showed the newest version — there was nothing to compare a rewrite against.
+
+The data was never lost: `/api/reviews/[orderId]/revision` already snapshots
+`previousResult`, `previousScore` and `previousFiles` onto the Revision row, and
+the order API already returns `revisions`. The UI simply never read
+`previousFiles` — the Revision History card rendered only round number, feedback
+text and score.
+
+### What changed
+- **`src/components/orders/deliverable-files.tsx`** (new) — the delivered-files
+  rendering (image grid, file rows, inline HTML preview) lifted out of the order
+  page so history can reuse it. Two props matter:
+  - `openUrlFor` — the caller decides which route re-serves an inline `data:`
+    deliverable, because resolving a historical file against the current
+    execution is actively wrong (see below).
+  - `compact` — drops the full-height iframe. Revision history stacks several
+    deliveries in one column; an iframe each would bury the page.
+- **`src/app/api/revisions/[revisionId]/[name]/route.ts`** (new) — serves a file
+  out of a Revision's `previousFiles`. **This route exists because reusing
+  `/api/deliverables/[executionId]/[name]` would silently serve the wrong file**:
+  it matches on filename against the execution's *current* outputFiles, and every
+  round tends to deliver an `index.html`, so round 1's link would have shown
+  round 2's content under round 1's heading. Same access rules and sandbox CSP as
+  the deliverables route.
+- **`src/app/dashboard/orders/[id]/page.tsx`** — Revision History now renders
+  "Delivered in round N" with that round's files; the Delivered Files card uses
+  the shared component; `RevisionEntry` replaces the `any` casts; imports that
+  only the extracted block used are gone.
+
+### Verified on real data (order `cmug0ejsj000104ich6azfpfw`, round 2)
+- Delivered Files card unchanged — this was a refactor of working code, so that
+  was the regression to watch.
+- "Delivered in round 1" renders with both files, each with Open and Download.
+- Exactly one iframe on the page: the current delivery keeps its preview, the
+  compact history adds none.
+- 375px: no overflow.
+
+### Fixed during review
+The compact rows first used the same single-line layout as the main card. In the
+~220px revision column that left the filename no width — it rendered as "o…" and
+sometimes as nothing at all. Compact now puts the name on its own line with the
+size and actions beneath it.
+
+### Also in this commit: the 0/5 work-plan fix, now confirmed
+`thepack-mcpb/src/runner.ts` — the instruction to call `report_progress` was one
+line wedged between `set_task_plan` and a several-hundred-word block on delivery
+formats, and agents skipped it: round 1 of the test order finished with a
+5-step plan still showing 0/5 and no logs. It is now a hard requirement with its
+reason stated, plus a step `f` that re-checks the plan before submitting.
+**Round 2 of that order ran with the new prompt and reported 6/6 done.**
+
+### Known, pre-existing, NOT from this change
+The dashboard overflows horizontally between roughly 768px and 1023px, where the
+sidebar expands at `md` while `main` is still `w-full`. `/dashboard/wallet`
+(untouched here) is worse at 201px than the order page at 151px, and the widest
+element inside `main` on the order page is 583px — nothing in the content is
+oversized, the layout arithmetic is. `/dashboard/agents` and `/dashboard/tasks`
+are fine. Both 375px and 1440px are clean everywhere. Needs its own pass.
