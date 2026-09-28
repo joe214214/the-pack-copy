@@ -2787,3 +2787,69 @@ A factual inventory of the product for whoever writes the résumé or portfolio
 entry: scale numbers, stack, feature areas, and the engineering work that has
 measurements attached. It ends with a caveats section listing what must not be
 overclaimed — the mock payments especially.
+
+---
+
+## 2026-09-28 — Portfolio screenshots reshot, and the data behind them made real
+
+### The after set was stale and had to be redone
+`design-audit/after/` was shot on **9/22 at 19:51 — eighteen minutes after
+`before/`**. Everything since was missing from it: the rewritten landing page
+(9/23), the real dashboard data (9/25), the tablet fix (9/25), the data cleanup
+(9/27). It also had desktop only, no mobile.
+
+Reshot 12 images: **desktop 1440 and mobile 375, for the 6 pages that have a
+`before`** (home, dashboard, agents, tasks, orders, wallet). Every one verified
+to have no horizontal overflow at capture time.
+
+One detail worth keeping: the old mobile `before` shots are 375, 417, 415, 407,
+413 and 411px wide — inconsistent because **the overflow itself was expanding
+the viewport**. The new ones are all exactly 375. That difference is itself the
+evidence for the responsive work.
+
+### Two data problems the screenshots exposed
+Both were real product-state problems, not presentation problems, so they were
+fixed in the data rather than faked in the UI.
+
+**The marketplace had one open task.** After the cleanup only `Q4 Sales Report
+Formatting` was still OPEN, so `/dashboard/tasks` was a single card above
+two-thirds of empty space. `scripts/seed-marketplace.ts` (new) adds seven
+realistic open tasks across seven task types, published by Sarah so they read as
+someone else's work when browsing as Alex. Purely additive — no orders, no
+escrow, no balance touched.
+
+**Twelve orders sat in REVIEW**, so the dashboard read "12 waiting on you" — a
+backlog, and `Platform Activity` showed "Tasks completed today 0 / Agents online
+now 0", which makes a live marketplace look dead.
+
+Nine were accepted **through the real `POST /api/reviews/[orderId]` endpoint**
+rather than by writing rows by hand, so the bookkeeping stayed consistent. Three
+were deliberately left in REVIEW, because "waiting on you" is a genuine product
+state worth showing — three reads as normal, twelve reads as neglect.
+
+Books after, all self-consistent:
+
+| | |
+|---|---|
+| Orders | 12 SETTLED, 3 REVIEW |
+| Alex frozen balance | $1035 → $570 (escrow released on acceptance) |
+| Marco earned | $547.20 = $608 − 10% platform fee ($60.80) |
+| Settlements / credit records | 12 each |
+| Claude 1 | PLATINUM 93.6%, 15 completed |
+
+Claude 1 dropped from DIAMOND to PLATINUM because the ratings were a realistic
+mix of 4s and 5s. That is the reputation system working, and more credible than
+DIAMOND off seven orders.
+
+`Agents online now` was made non-zero by actually running the runner against
+localhost during the shoot, so the heartbeat was real.
+
+Dashboard figures in the final shots: 14 active tasks, 2 agents, 3 open orders,
+$565 spent, 9 completed today, 1 agent online, 4.2 min average, 100% satisfaction
+over 12 reviews.
+
+### One layout fix the shoot caught
+Recent Orders kept the task name, status badge and price on one line, which at
+375px cut every name to "Landing page f…". The row is now a container query that
+stacks below `@sm`, so the name gets the full width and the badge and price sit
+under it.

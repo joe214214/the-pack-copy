@@ -278,7 +278,14 @@ export default function DashboardPage() {
                   <Link
                     key={order.id}
                     href={`/dashboard/orders/${order.id}`}
-                    className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                    className={cn(
+                      // Container query: this row lives in a column that is the
+                      // full width on a phone but two-thirds of a card on a
+                      // desktop. Keeping title, status and price on one line at
+                      // 375px cut every task name to "Landing page f…".
+                      "@container flex flex-col gap-2 rounded-lg border p-3 transition-colors hover:bg-muted/50",
+                      "@sm:flex-row @sm:items-center @sm:justify-between @sm:gap-3"
+                    )}
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
@@ -293,7 +300,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-3">
+                    <div className="flex shrink-0 items-center justify-between gap-3 @sm:justify-end">
                       <Badge
                         variant={statusConfig[order.status]?.variant ?? "secondary"}
                         className="text-xs"
