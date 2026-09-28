@@ -2905,3 +2905,46 @@ Verified against a freshly registered account: orders and wallet both render
 Removed unused `Clock` / `BarChart2` imports and replaced an `any` with a typed
 `RecentOrder` on the reputation page — pre-existing, surfaced by linting the
 files this touched.
+
+---
+
+## 2026-09-28 — Before/after comparison images for the job application
+
+`design-audit/pairs/` — three labelled comparisons, plus the raw captures each
+was built from.
+
+| file | the claim it evidences |
+|---|---|
+| `compare_tasks_desktop.png` | single-column list → three-column grid in a capped column |
+| `compare_wallet_tablet.png` | the 768–1023px overflow and the sidebar breakpoint fix |
+| `compare_dashboard_mobile.png` | 375px, header and page actions given room to shrink |
+
+### The "before" images were re-shot, not taken from design-audit/before/
+That folder is the real historical state from 9/22, but it mixes two kinds of
+change: the layout work **and** the data (the marketplace had one open task then
+and eight now, seven of them seeded later). Presenting that as a design
+comparison invites the obvious objection — that the page only looks fuller
+because more rows were added.
+
+So the three design changes were **temporarily reverted** — sidebar breakpoint
+back to `md`/768, the tasks grid back to `space-y-3`, the mobile header and the
+dashboard page header back to their unshrinkable versions — rebuilt, and shot
+against **today's database**. Then `git checkout -- the-pack-main/src` restored
+everything and the "after" set was shot from the same data. The only difference
+between the two halves of each image is the design.
+
+Measured at capture time, which is what the labels quote: wallet at 768px
+overflowed by 100px before and fits after; the dashboard at 375px pushed the
+viewport to 447px before and fits exactly after.
+
+### Both panels are drawn at one scale
+A 447px capture and a 375px capture rendered to the same display width would
+shrink the wider one, which reads as "the after is just zoomed in" — the
+opposite of the finding. Each pair is scaled by
+`colW / max(beforeWidth, afterWidth)`, so the overflowing capture stays visibly
+wider, and every image carries its own footnote saying so.
+
+`scratchpad/compose2.mjs` builds them: the layout is HTML rendered headless and
+screenshotted, so the labels and type are under the same control as the product
+and there is no image toolchain to install. Re-run it against
+`design-audit/pairs` to regenerate.
