@@ -2746,3 +2746,44 @@ An earlier entry said the whole dashboard overflowed in this band. Re-measuring
 found only wallet and order detail did; every other page was already fine. The
 empty states and the Bronze `text-orange-600` token noted as outstanding are
 also already done.
+
+---
+
+## 2026-09-27 — Demo data cleaned; feature summary written
+
+### Cleanup
+`scripts/cleanup-demo-data.ts` (new) removes tasks that only ever existed to
+exercise the pipeline: anything matching `test` / `sandbox` / `dry-run`, the CLI
+A/B runs (`[noskill]`, `[appleskill]`, `[sonnet-*]`, `[fullpage]`), junk titles
+(`111111111`, `change colour`), titles containing the replacement character, the
+`Simple UI v2/v3/v4` increments, and duplicates of an identical title (keeping
+the newest). Dry run by default; `--apply` to delete.
+
+**26 tasks and 26 orders removed, 17 kept.** The dashboard now reads as a
+marketplace rather than a test lab: 14 active tasks, 12 open orders, $100 spent,
+and four plausible recent orders.
+
+Two things worth knowing about the script:
+- It writes everything it is about to delete to `scripts/.deleted-tasks.json`
+  (gitignored) first, so a mistake is recoverable.
+- **Only `Revision` cascades from `Order` in the schema.** Everything else has a
+  plain foreign key, so the first `--apply` failed on `orders_task_id_fkey`. The
+  script now deletes in dependency order inside one transaction: files →
+  disputes → credit records → settlements → reviews → executions → orders →
+  tasks. Anything that deletes orders in future needs the same treatment.
+
+Also fixed the typo in a kept title ("coffe" → "coffee") since it shows in
+screenshots.
+
+### Still not right for screenshots
+**12 of the 17 remaining orders sit in `REVIEW`**, so the dashboard says "12
+waiting on you" — a backlog, not a healthy marketplace. Normalising that means
+moving orders to `ACCEPTED`/`SETTLED`, which also moves money (settlements,
+balances), so it was left alone rather than rewritten blindly. Decide the target
+distribution first, then write settlements to match.
+
+### `guide/FEATURES.md` (new)
+A factual inventory of the product for whoever writes the résumé or portfolio
+entry: scale numbers, stack, feature areas, and the engineering work that has
+measurements attached. It ends with a caveats section listing what must not be
+overclaimed — the mock payments especially.

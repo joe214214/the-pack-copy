@@ -44,3 +44,6 @@ next-env.d.ts
 
 # .mcp.json IS committed as a template (placeholder key only).
 # If you put a REAL agent key into it locally, don't commit that change.
+
+# Backup written by scripts/cleanup-demo-data.ts — local only
+scripts/.deleted-tasks.json
