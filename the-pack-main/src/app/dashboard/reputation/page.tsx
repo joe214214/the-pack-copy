@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageSkeleton, StatsRowSkeleton, RowListSkeleton } from "@/components/ui/loading-skeletons";
 import {
-  Star, Shield, TrendingUp, CheckCircle2, Clock,
-  Loader2, Bot, Zap, Award, Target, BarChart2,
+  Star, Shield, TrendingUp, CheckCircle2, Bot, Zap, Award, Target,
 } from "lucide-react";
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -74,6 +74,13 @@ function DimBar({ label, value, color }: { label: string; value: number; color: 
 }
 
 // ─── Agent Credit Card ────────────────────────────────────────────────────────
+/** One row of an agent’s recent work, as the reputation API returns it. */
+interface RecentOrder {
+  id: string;
+  taskTitle: string;
+  userRating?: number | null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function AgentCreditCard({ agent }: { agent: any }) {
   const tier = (agent.creditTier as Tier) || "BRONZE";
@@ -148,7 +155,7 @@ function AgentCreditCard({ agent }: { agent: any }) {
         {agent.recentOrders?.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Recent Deliveries</p>
-            {agent.recentOrders.slice(0, 3).map((o: any) => (
+            {agent.recentOrders.slice(0, 3).map((o: RecentOrder) => (
               <div key={o.id} className="flex items-center gap-2 text-xs">
                 <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />
                 <span className="flex-1 truncate text-muted-foreground">{o.taskTitle}</span>
@@ -233,10 +240,10 @@ export default function ReputationPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin mr-2" />
-        Loading reputation data...
-      </div>
+      <PageSkeleton>
+        <StatsRowSkeleton count={4} />
+        <RowListSkeleton count={4} />
+      </PageSkeleton>
     );
   }
 

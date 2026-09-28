@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 import {
   Plus,
   Search,
-  Loader2,
   FileText,
   Globe,
 } from "lucide-react";
 import { layout } from "@/lib/design";
+import { CardGridSkeleton } from "@/components/ui/loading-skeletons";
 
 type TabId = "open" | "mine";
 
@@ -162,10 +162,7 @@ export default function TasksPage() {
 
       {/* Task list */}
       {loading ? (
-        <div className="flex items-center justify-center h-48 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin mr-2" />
-          Loading tasks...
-        </div>
+        <CardGridSkeleton count={6} />
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground gap-3">
           <FileText className="h-10 w-10 text-muted-foreground/30" />

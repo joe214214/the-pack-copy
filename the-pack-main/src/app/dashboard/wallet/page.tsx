@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   Wallet, TrendingUp, TrendingDown, Lock, ArrowUpRight,
-  ArrowDownRight, Clock, CheckCircle2, RefreshCw, Loader2,
-  CreditCard, Zap, ShieldCheck, DollarSign,
+  ArrowDownRight, Plus, Clock, CheckCircle2, RefreshCw, CreditCard, Zap, ShieldCheck, DollarSign,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { PageSkeleton, StatsRowSkeleton, RowListSkeleton } from "@/components/ui/loading-skeletons";
 
 const n = (v: unknown) => Number(v ?? 0);
 type TxType = "charge" | "refund" | "escrow" | "earning" | "deposit";
@@ -167,10 +168,10 @@ export default function WalletPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin mr-2" />
-        Loading wallet...
-      </div>
+      <PageSkeleton>
+        <StatsRowSkeleton count={3} />
+        <RowListSkeleton count={6} />
+      </PageSkeleton>
     );
   }
 
@@ -290,9 +291,18 @@ export default function WalletPage() {
         </CardHeader>
         <CardContent>
           {filteredTx.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground">
-              <Wallet className="h-10 w-10 mx-auto mb-3 opacity-30" />
-              <p>No transactions yet.</p>
+            <div className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
+              <Wallet className="h-10 w-10 opacity-30" />
+              <div>
+                <p className="font-medium text-foreground">No transactions yet</p>
+                <p className="mt-1 text-sm">
+                  Escrow, fees and payouts appear here once a task of yours runs.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" render={<Link href="/dashboard/tasks/new" />}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Publish a task
+              </Button>
             </div>
           ) : (
             <div className="divide-y divide-transparent">

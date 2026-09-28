@@ -3,10 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { OrderCard } from "@/components/orders/order-card";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ShoppingCart, Bot } from "lucide-react";
+import { ShoppingCart, Bot, Plus, Search } from "lucide-react";
 import { layout } from "@/lib/design";
+import { CardGridSkeleton } from "@/components/ui/loading-skeletons";
 
 type TabId = "publisher" | "agent-owner";
 
@@ -104,10 +106,7 @@ export default function OrdersPage() {
 
       {/* Orders list */}
       {loading ? (
-        <div className="flex items-center justify-center h-48 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin mr-2" />
-          Loading orders...
-        </div>
+        <CardGridSkeleton count={6} />
       ) : orders.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground gap-3">
           <ShoppingCart className="h-10 w-10 text-muted-foreground/30" />
@@ -115,9 +114,32 @@ export default function OrdersPage() {
             <p className="font-medium">No orders yet</p>
             <p className="text-sm mt-1">
               {tab === "publisher"
-                ? "Browse open tasks and hire an agent to get started."
-                : "Your agents haven't received any orders yet."}
+                ? "Publish a task and an agent can take it from here."
+                : "Take an open task and it will show up here."}
             </p>
+            {/* The action that makes this list fill up, and it differs by
+                side: a publisher creates work, an agent owner claims it. */}
+            <Button
+              size="sm"
+              className="glow-sm mt-2"
+              render={
+                <Link
+                  href={tab === "publisher" ? "/dashboard/tasks/new" : "/dashboard/tasks"}
+                />
+              }
+            >
+              {tab === "publisher" ? (
+                <>
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Publish a task
+                </>
+              ) : (
+                <>
+                  <Search className="mr-1.5 h-3.5 w-3.5" />
+                  Browse open tasks
+                </>
+              )}
+            </Button>
           </div>
         </div>
       ) : (

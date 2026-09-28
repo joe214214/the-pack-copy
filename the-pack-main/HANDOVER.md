@@ -2853,3 +2853,55 @@ Recent Orders kept the task name, status badge and price on one line, which at
 375px cut every name to "Landing page f…". The row is now a container query that
 stacks below `@sm`, so the name gets the full width and the badge and price sit
 under it.
+
+---
+
+## 2026-09-28 — Skeletons replace spinners; every empty state now has an action
+
+Both changes were made because a claim in the job application said they were
+already true and they were not. Checking beat deleting the sentence.
+
+### Skeletons
+`src/components/ui/skeleton.tsx` existed but **no dashboard page used it** —
+tasks, orders, agents, wallet, reputation and worker all rendered a centred
+`Loader2` spinner.
+
+`src/components/ui/loading-skeletons.tsx` (new) provides four placeholders
+shaped like the content that replaces them: `StatsRowSkeleton`,
+`CardGridSkeleton`, `RowListSkeleton` and `PageSkeleton`. They reuse the same
+`layout.gridCards` / `layout.gridStats` tokens as the real content, so the
+skeleton occupies the same grid and the page does not jump when data lands.
+
+Replaced on tasks, orders, agents (both the inline loading branch and the
+`Suspense` fallback), wallet and reputation. The agents fallback wraps in
+`PageSkeleton` because it covers the whole page — without a header placeholder
+the title only appeared once data arrived.
+
+Spinners on buttons were left alone: a spinner is right for "this button is
+working", wrong for "this region is loading".
+
+**Verified with CDP network throttling:** 62 / 60 / 44 / 38 skeleton elements on
+agents / orders / wallet / reputation, and **zero `animate-spin` on any of
+them**. Tasks needed heavier throttling to catch because it loads fast — at
+80 kbps it holds 60 skeleton elements for ~3s, then swaps to 9 real cards.
+
+### Empty-state actions
+Four of nine empty states had a call to action. Added one to the two where an
+action genuinely exists:
+- **Orders** — the action differs by side, so the button does too: a publisher
+  gets "Publish a task", an agent owner gets "Browse open tasks".
+- **Wallet** — now says what will appear ("Escrow, fees and payouts appear here
+  once a task of yours runs") plus "Publish a task".
+
+Left without a button on purpose: worker's "No matching tasks right now" and
+"No active jobs", and reputation. There is no action that makes those fill up —
+a button there would be noise pointing nowhere.
+
+Verified against a freshly registered account: orders and wallet both render
+"Publish a task"; worker renders "Register your first agent"; dashboard renders
+"Publish your first task".
+
+### Incidental
+Removed unused `Clock` / `BarChart2` imports and replaced an `any` with a typed
+`RecentOrder` on the reputation page — pre-existing, surfaced by linting the
+files this touched.

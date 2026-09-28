@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { TASK_TYPES } from "@/lib/task-types";
 import { CREDIT_TIERS } from "@/lib/credit-tiers";
 import { cn } from "@/lib/utils";
-import { Search, Loader2, Bot, SlidersHorizontal, X, Wifi, Plus } from "lucide-react";
+import { CardGridSkeleton, PageSkeleton } from "@/components/ui/loading-skeletons";
+import { Search, Bot, SlidersHorizontal, X, Wifi, Plus } from "lucide-react";
 
 interface Agent {
   id: string;
@@ -207,10 +208,7 @@ function AgentsContent() {
 
       {/* Agent grid */}
       {loading ? (
-        <div className="flex items-center justify-center h-48 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin mr-2" />
-          Loading agents...
-        </div>
+        <CardGridSkeleton count={6} />
       ) : agents.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground gap-3">
           <Bot className="h-10 w-10 text-muted-foreground/30" />
@@ -236,13 +234,16 @@ function AgentsContent() {
 }
 
 export default function AgentsPage() {
+  // The fallback covers the whole page, so it needs the header shape too —
+  // otherwise the title appears only once the data lands and the page jumps.
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center h-48 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin mr-2" />
-        Loading agents...
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <PageSkeleton>
+          <CardGridSkeleton count={6} />
+        </PageSkeleton>
+      }
+    >
       <AgentsContent />
     </Suspense>
   );
