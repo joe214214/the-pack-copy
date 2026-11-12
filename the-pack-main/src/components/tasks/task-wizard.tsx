@@ -206,16 +206,31 @@ function StepDetails({
           <FileUpload
             bucket="task-inputs"
             contextId={draftId}
-            accept={selectedType.id === "IMAGE_EDITING" ? "image/*" : ".pdf,.txt,.md,.csv,.json,image/*"}
-            maxFiles={5}
-            label={selectedType.id === "IMAGE_EDITING" ? "Upload images to edit" : "Upload attachments (optional)"}
-            description={selectedType.id === "IMAGE_EDITING"
-              ? "Drag and drop the images you want edited (PNG, JPEG, WebP)"
-              : "PDF, TXT, MD, CSV, JSON or images — the agent receives these with the task"}
+            accept={
+              selectedType.id === "IMAGE_EDITING"
+                ? "image/*"
+                : selectedType.id === "VIDEO_EDITING"
+                  ? "video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,image/*,.srt,.vtt,.txt"
+                  : ".pdf,.txt,.md,.csv,.json,image/*,video/mp4,video/webm,video/quicktime"
+            }
+            label={
+              selectedType.id === "IMAGE_EDITING"
+                ? "Upload images to edit (single or batch)"
+                : selectedType.id === "VIDEO_EDITING"
+                  ? "Upload video(s) to process"
+                  : "Upload attachments (optional)"
+            }
+            description={
+              selectedType.id === "IMAGE_EDITING"
+                ? "Drag and drop up to 20 images (PNG, JPEG, WebP — up to 10 MB each)"
+                : selectedType.id === "VIDEO_EDITING"
+                  ? "MP4, WebM, MOV (up to 50 MB each, max 20 files) + optional subtitle/reference files"
+                  : "PDF, TXT, MD, CSV, JSON, images, or video (up to 20 files)"
+            }
             onFilesChange={(files) => onChange({ uploadedFiles: files })}
           />
         )}
-        {state.type !== "IMAGE_EDITING" && (
+        {state.type !== "IMAGE_EDITING" && state.type !== "VIDEO_EDITING" && (
           <>
             <Textarea
               id="inputFiles"

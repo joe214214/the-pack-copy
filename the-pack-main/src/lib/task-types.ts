@@ -11,6 +11,7 @@ import {
   FileStack,
   ImageIcon,
   Paintbrush,
+  Film,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -26,6 +27,7 @@ export type TaskTypeId =
   | "FORMATTING"
   | "IMAGE_GENERATION"
   | "IMAGE_EDITING"
+  | "VIDEO_EDITING"
   | "CUSTOM";
 
 export interface TaskTypeMeta {
@@ -117,14 +119,26 @@ export const TASK_TYPES: TaskTypeMeta[] = [
   {
     id: "IMAGE_EDITING",
     label: "Image Editing",
-    description: "Edit, retouch, enhance, or transform existing images.",
+    description: "Edit, retouch, enhance, or batch-process existing images.",
     icon: Paintbrush,
     color: "text-orange-400",
     bgColor: "bg-orange-500/10",
     borderColor: "border-orange-500/30",
-    examples: ["Background removal", "Color correction", "Style transfer"],
+    examples: ["Background removal", "Color correction", "Batch resize / watermark"],
     acceptsInputFiles: true,
     outputFileTypes: ["image/png", "image/jpeg", "image/webp"],
+  },
+  {
+    id: "VIDEO_EDITING",
+    label: "Video Processing",
+    description: "Trim, compress, transcode, caption, or batch-process video clips with ffmpeg.",
+    icon: Film,
+    color: "text-indigo-400",
+    bgColor: "bg-indigo-500/10",
+    borderColor: "border-indigo-500/30",
+    examples: ["Trim & compress MP4", "Burn in subtitles", "Convert to 9:16 vertical", "Extract frames / GIF"],
+    acceptsInputFiles: true,
+    outputFileTypes: ["video/mp4", "video/webm", "video/quicktime"],
   },
   {
     id: "CUSTOM",

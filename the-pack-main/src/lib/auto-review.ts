@@ -41,12 +41,18 @@ export async function runAutoReview(params: {
   outputFormat: string | null;
   outputDir: string;
   qualityCriteria?: Record<string, unknown> | null;
+  expectedInputCount?: number;
+  fileSizes?: Record<string, number>;
 }): Promise<AutoReviewResult> {
   const { executionId, taskType, outputFormat, outputDir } = params;
 
   // Route to image-specific review for image task types
   if (isImageTask(taskType)) {
     return runImageAutoReview(params);
+  }
+
+  if (taskType === "VIDEO_EDITING") {
+    return runVideoAutoReview(params);
   }
 
   // CUSTOM tasks put no restriction on the output form — the deliverable may be
@@ -258,8 +264,10 @@ async function runImageAutoReview(params: {
   taskTitle: string;
   outputFormat: string | null;
   outputDir: string;
+  expectedInputCount?: number;
+  fileSizes?: Record<string, number>;
 }): Promise<AutoReviewResult> {
-  const { outputDir } = params;
+  const { outputDir, expectedInputCount = 0, fileSizes = {} } = params;
   const checks: AutoCheck[] = [];
 
   // ── 1. Output directory exists and has files ─────────────────────────────────
@@ -328,15 +336,15 @@ async function runImageAutoReview(params: {
   let sizeDetails = "Image file size(s) within acceptable range";
   for (const img of imageFiles) {
     try {
-      const stat = fs.statSync(path.join(outputDir, img));
-      if (stat.size < MIN_IMAGE_SIZE) {
+      const size = fileSizes[img] ?? fs.statSync(path.join(outputDir, img)).size;
+      if (size < MIN_IMAGE_SIZE) {
         sizeOk = false;
-        sizeDetails = `${img} is too small (${(stat.size / 1024).toFixed(1)} KB, min 1 KB)`;
+        sizeDetails = `${img} is too small (${(size / 1024).toFixed(1)} KB, min 1 KB)`;
         break;
       }
-      if (stat.size > MAX_IMAGE_SIZE) {
+      if (size > MAX_IMAGE_SIZE) {
         sizeOk = false;
-        sizeDetails = `${img} is too large (${(stat.size / 1024 / 1024).toFixed(1)} MB, max 20 MB)`;
+        sizeDetails = `${img} is too large (${(size / 1024 / 1024).toFixed(1)} MB, max 20 MB)`;
         break;
       }
     } catch {
@@ -379,7 +387,20 @@ async function runImageAutoReview(params: {
     weight: 2.0,
   });
 
-  // ── 6. Metadata file present ──────────────────────────────────────────────────
+  // ── 6. Batch count match (when publisher attached multiple images) ──────────
+  if (params.taskType === "IMAGE_EDITING" && expectedInputCount > 1) {
+    const countMatched = imageFiles.length >= expectedInputCount;
+    checks.push({
+      check: "batch_count_match",
+      passed: countMatched,
+      details: countMatched
+        ? `Delivered ${imageFiles.length}/${expectedInputCount} expected image(s)`
+        : `Delivered ${imageFiles.length} image(s), expected ${expectedInputCount} (one per input)`,
+      weight: 1.5,
+    });
+  }
+
+  // ── 7. Metadata file present ──────────────────────────────────────────────────
   const hasMetadata = fs.existsSync(path.join(outputDir, "metadata.json"));
   checks.push({
     check: "metadata_present",
@@ -389,4 +410,129 @@ async function runImageAutoReview(params: {
   });
 
   return buildResult(checks, `Image auto-review completed for ${params.taskType} task`);
+}
+
+/**
+ * Run auto-review for VIDEO_EDITING tasks.
+ * Video deliverables are normally MP4/WebM/MOV, or extracted frames/GIF when
+ * the brief asks for frame extraction. Checks existence, container format,
+ * size bounds, and magic-byte header integrity.
+ */
+async function runVideoAutoReview(params: {
+  executionId: string;
+  taskType: string;
+  taskTitle: string;
+  outputFormat: string | null;
+  outputDir: string;
+  expectedInputCount?: number;
+  fileSizes?: Record<string, number>;
+}): Promise<AutoReviewResult> {
+  const { outputDir, expectedInputCount = 0, fileSizes = {} } = params;
+  const checks: AutoCheck[] = [];
+
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(outputDir).filter((f: string) => !f.startsWith(".") && f !== "output.md" && f !== "metadata.json");
+  } catch { /* empty */ }
+
+  const outputExists = files.length > 0;
+  checks.push({
+    check: "output_exists",
+    passed: outputExists,
+    details: outputExists ? `Output contains ${files.length} deliverable file(s)` : "No output files found",
+    weight: 2.0,
+  });
+  if (!outputExists) return buildResult(checks, "No output produced by agent execution");
+
+  const videoExts = new Set([".mp4", ".m4v", ".webm", ".mov"]);
+  const frameExts = new Set([".gif", ".png", ".jpg", ".jpeg", ".webp"]);
+  const mediaFiles = files.filter((f) => {
+    const ext = path.extname(f).toLowerCase();
+    return videoExts.has(ext) || frameExts.has(ext);
+  });
+  const hasMedia = mediaFiles.length > 0;
+  checks.push({
+    check: "video_output_exists",
+    passed: hasMedia,
+    details: hasMedia
+      ? `Found ${mediaFiles.length} media file(s): ${mediaFiles.slice(0, 6).join(", ")}${mediaFiles.length > 6 ? "…" : ""}`
+      : "No video or extracted-frame files found in output",
+    weight: 2.0,
+  });
+  if (!hasMedia) return buildResult(checks, "No video/media files in output");
+
+  const maxMb = Number(process.env.MAX_VIDEO_FILE_MB) || 50;
+  const MAX_SIZE = maxMb * 1024 * 1024;
+  let sizeOk = true;
+  let sizeDetails = "Media file size(s) within acceptable range";
+  for (const f of mediaFiles) {
+    try {
+      const size = fileSizes[f] ?? fs.statSync(path.join(outputDir, f)).size;
+      if (size < 512) {
+        sizeOk = false;
+        sizeDetails = `${f} is too small (${size} B)`;
+        break;
+      }
+      if (size > MAX_SIZE) {
+        sizeOk = false;
+        sizeDetails = `${f} exceeds ${maxMb} MB limit`;
+        break;
+      }
+    } catch {
+      sizeOk = false;
+      sizeDetails = `Failed to read size for ${f}`;
+      break;
+    }
+  }
+  checks.push({ check: "video_size", passed: sizeOk, details: sizeDetails, weight: 1.0 });
+
+  // Container header check on the first few files: MP4/MOV have "ftyp"/"moov"/"wide"/"mdat"
+  // at offset 4; WebM starts with EBML 0x1A45DFA3; GIF/PNG/JPEG/WebP for frame outputs.
+  let integrityOk = true;
+  let integrityDetails = "Media file container headers valid";
+  for (const f of mediaFiles.slice(0, 5)) {
+    try {
+      const data = fs.readFileSync(path.join(outputDir, f));
+      const ext = path.extname(f).toLowerCase();
+      if (videoExts.has(ext)) {
+        const box = data.length >= 8 ? data.subarray(4, 8).toString("ascii") : "";
+        const isIsoBmff = ["ftyp", "moov", "mdat", "wide", "free"].includes(box);
+        const isWebm = data.length >= 4 && data[0] === 0x1A && data[1] === 0x45 && data[2] === 0xDF && data[3] === 0xA3;
+        if (!isIsoBmff && !isWebm) {
+          integrityOk = false;
+          integrityDetails = `${f}: invalid video container header`;
+          break;
+        }
+      } else {
+        const isPng = data[0] === 0x89 && data[1] === 0x50;
+        const isJpeg = data[0] === 0xFF && data[1] === 0xD8;
+        const isGif = data.subarray(0, 3).toString("ascii") === "GIF";
+        const isWebp = data.length > 12 && data.subarray(8, 12).toString("ascii") === "WEBP";
+        if (!isPng && !isJpeg && !isGif && !isWebp) {
+          integrityOk = false;
+          integrityDetails = `${f}: invalid image/frame header`;
+          break;
+        }
+      }
+    } catch {
+      integrityOk = false;
+      integrityDetails = `Failed to read ${f} for header check`;
+      break;
+    }
+  }
+  checks.push({ check: "video_not_corrupt", passed: integrityOk, details: integrityDetails, weight: 2.0 });
+
+  if (expectedInputCount > 1) {
+    const countMatched = mediaFiles.length >= expectedInputCount;
+    checks.push({
+      check: "batch_count_match",
+      passed: countMatched,
+      details: countMatched
+        ? `Delivered ${mediaFiles.length}/${expectedInputCount} expected output(s)`
+        : `Delivered ${mediaFiles.length} output(s) for ${expectedInputCount} inputs`,
+      weight: 1.5,
+    });
+  }
+
+  return buildResult(checks, "Video auto-review completed");
 }

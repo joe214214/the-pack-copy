@@ -3,7 +3,12 @@
 import { useState, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Upload, X, FileText, ImageIcon, Loader2, CheckCircle2 } from "lucide-react";
+import { Upload, X, FileText, Film, Loader2, CheckCircle2 } from "lucide-react";
+
+const DEFAULT_MAX_FILES = (() => {
+  const n = Number(process.env.NEXT_PUBLIC_MAX_TASK_FILES);
+  return Number.isInteger(n) && n > 0 ? n : 20;
+})();
 
 export interface UploadedFile {
   id: string;
@@ -75,8 +80,8 @@ async function uploadDirect(
 export function FileUpload({
   bucket,
   contextId,
-  accept = "image/*,.pdf,.txt,.md,.csv,.json",
-  maxFiles = 10,
+  accept = "image/*,video/mp4,video/webm,video/quicktime,.pdf,.txt,.md,.csv,.json",
+  maxFiles = DEFAULT_MAX_FILES,
   onFilesChange,
   className,
   label = "Upload Files",
@@ -136,6 +141,9 @@ export function FileUpload({
   }, []);
 
   const isImage = (contentType: string) => contentType.startsWith("image/");
+  const isVideo = (contentType: string) => contentType.startsWith("video/");
+  const formatSize = (size: number) =>
+    size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${(size / 1024).toFixed(1)} KB`;
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -197,6 +205,10 @@ export function FileUpload({
                   alt={file.filename}
                   className="h-10 w-10 rounded object-cover border"
                 />
+              ) : isVideo(file.contentType) ? (
+                <div className="flex h-10 w-10 items-center justify-center rounded bg-indigo-500/10 border border-indigo-500/30">
+                  <Film className="h-5 w-5 text-indigo-400" />
+                </div>
               ) : (
                 <div className="flex h-10 w-10 items-center justify-center rounded bg-muted">
                   <FileText className="h-5 w-5 text-muted-foreground" />
@@ -207,7 +219,7 @@ export function FileUpload({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{file.filename}</p>
                 <p className="text-xs text-muted-foreground">
-                  {(file.size / 1024).toFixed(1)} KB
+                  {formatSize(file.size)}
                   {file.width && file.height && ` · ${file.width}×${file.height}`}
                 </p>
               </div>

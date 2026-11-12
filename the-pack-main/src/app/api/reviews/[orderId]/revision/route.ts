@@ -10,11 +10,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { MAX_TASK_FILES } from "@/lib/storage";
 import { z } from "zod";
 
 const revisionSchema = z.object({
   feedback: z.string().min(1).max(5000),
-  fileIds: z.array(z.string()).max(10).optional(),
+  fileIds: z.array(z.string()).max(MAX_TASK_FILES).optional(),
 });
 
 export async function POST(

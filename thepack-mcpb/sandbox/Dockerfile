@@ -23,7 +23,7 @@ FROM node:24-slim
 # without a C++ compiler it cannot build its native modules (node-pty).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pil python3-numpy python3-pip python3-venv \
-      fonts-dejavu-core \
+      ffmpeg fonts-dejavu-core \
       ca-certificates git curl ripgrep xz-utils build-essential \
     && rm -rf /var/lib/apt/lists/*
 

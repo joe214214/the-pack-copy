@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { MAX_TASK_FILES } from "@/lib/storage";
 import { getFileUrl } from "@/lib/storage";
 import { z } from "zod";
 
@@ -71,6 +72,7 @@ const createTaskSchema = z.object({
     "FORMATTING",
     "IMAGE_GENERATION",
     "IMAGE_EDITING",
+    "VIDEO_EDITING",
     "CUSTOM",
   ]),
   title: z.string().min(5).max(200),
@@ -81,7 +83,7 @@ const createTaskSchema = z.object({
   maxRevisions: z.number().int().min(0).max(20).optional(),
   qualityCriteria: z.record(z.string(), z.unknown()).optional(),
   // IDs of File records the wizard pre-uploaded (attachments)
-  fileIds: z.array(z.string()).max(10).optional(),
+  fileIds: z.array(z.string()).max(MAX_TASK_FILES).optional(),
 });
 
 export async function POST(request: NextRequest) {

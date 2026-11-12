@@ -28,9 +28,12 @@ export interface UploadResult {
   size: number;
 }
 
+const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
+
 const ALLOWED_TYPES: Record<StorageBucket, string[]> = {
   "task-inputs": [
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
+    ...VIDEO_TYPES,
     "application/pdf", "text/plain", "text/markdown", "text/csv", "application/json",
   ],
   // text/html is here because the runner instructs agents to deliver a web
@@ -39,6 +42,7 @@ const ALLOWED_TYPES: Record<StorageBucket, string[]> = {
   // /api/files/[key] so it cannot act as this site.
   "task-outputs": [
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
+    ...VIDEO_TYPES,
     "application/pdf", "text/plain", "text/markdown", "text/csv",
     "application/json", "application/octet-stream",
     "text/html", "text/css", "text/javascript",
@@ -46,16 +50,38 @@ const ALLOWED_TYPES: Record<StorageBucket, string[]> = {
   "avatars": ["image/png", "image/jpeg", "image/webp", "image/gif"],
   "revision-feedback": [
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
+    ...VIDEO_TYPES,
     "application/pdf", "text/plain", "text/markdown", "text/csv", "application/json",
   ],
 };
 
+function mbEnv(name: string, fallbackMb: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1024 * 1024) : fallbackMb * 1024 * 1024;
+}
+
 const MAX_FILE_SIZE: Record<StorageBucket, number> = {
-  "task-inputs": 10 * 1024 * 1024,
-  "task-outputs": 20 * 1024 * 1024,
+  "task-inputs": mbEnv("MAX_INPUT_FILE_MB", 10),
+  "task-outputs": mbEnv("MAX_OUTPUT_FILE_MB", 20),
   "avatars": 2 * 1024 * 1024,
-  "revision-feedback": 10 * 1024 * 1024,
+  "revision-feedback": mbEnv("MAX_INPUT_FILE_MB", 10),
 };
+
+/** Video files get their own configurable ceiling (default 50 MB, the Supabase free-tier cap). */
+export const MAX_VIDEO_FILE_SIZE = mbEnv("MAX_VIDEO_FILE_MB", 50);
+
+/** Max files attached per task / revision (configurable; exposed to client via NEXT_PUBLIC_). */
+export const MAX_TASK_FILES = (() => {
+  const n = Number(process.env.NEXT_PUBLIC_MAX_TASK_FILES || process.env.MAX_TASK_FILES);
+  return Number.isInteger(n) && n > 0 ? n : 20;
+})();
+
+export function maxFileSizeFor(bucket: StorageBucket, contentType?: string): number {
+  if (contentType && isVideoContentType(contentType) && bucket !== "avatars") {
+    return MAX_VIDEO_FILE_SIZE;
+  }
+  return MAX_FILE_SIZE[bucket];
+}
 
 /** Every bucket this module owns, for provisioning and key validation. */
 export const STORAGE_BUCKETS = Object.keys(ALLOWED_TYPES) as StorageBucket[];
@@ -82,7 +108,7 @@ export function validateFile(bucket: StorageBucket, contentType: string, size: n
       "INVALID_TYPE"
     );
   }
-  const maxSize = MAX_FILE_SIZE[bucket];
+  const maxSize = maxFileSizeFor(bucket, contentType);
   if (size > maxSize) {
     throw new StorageError(
       `File size ${(size / 1024 / 1024).toFixed(1)}MB exceeds limit ${(maxSize / 1024 / 1024).toFixed(0)}MB`,
@@ -227,11 +253,16 @@ export function isImageContentType(contentType: string): boolean {
   return contentType.startsWith("image/");
 }
 
+export function isVideoContentType(contentType: string): boolean {
+  return contentType.startsWith("video/");
+}
+
 export function detectContentType(filename: string): string {
   const ext = path.extname(filename).toLowerCase();
   const mimeMap: Record<string, string> = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
     ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
     ".csv": "text/csv", ".json": "application/json",
     ".html": "text/html", ".htm": "text/html", ".css": "text/css", ".js": "text/javascript",

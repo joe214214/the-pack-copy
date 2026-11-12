@@ -11,10 +11,11 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft, CheckCheck, XCircle, Star, FileText, Bot,
   Loader2, ShieldCheck, AlertTriangle, CheckCircle2, Clock,
-  Download, Eye, Zap, ImageIcon, RotateCcw, History
+  Download, Eye, Zap, ImageIcon, Film, Archive, RotateCcw, History
 } from "lucide-react";
 import { toast } from "sonner";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
+import { downloadFilesAsZip } from "@/lib/zip";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -86,9 +87,11 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
 
   const isImage = file.type?.startsWith("image/") ||
     /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name);
+  const isVideo = file.type?.startsWith("video/") ||
+    /\.(mp4|m4v|webm|mov)$/i.test(file.name);
 
   const loadContent = async () => {
-    if (isImage) { setExpanded(!expanded); return; }
+    if (isImage || isVideo) { setExpanded(!expanded); return; }
     if (content !== null) { setExpanded(!expanded); return; }
     setLoading(true);
     try {
@@ -99,16 +102,22 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
     finally { setLoading(false); }
   };
 
+  const sizeText = file.size >= 1024 * 1024
+    ? `${(file.size / 1024 / 1024).toFixed(1)} MB`
+    : `${(file.size / 1024).toFixed(1)} KB`;
+
   return (
     <div className="rounded-lg border">
       <div className="flex items-center gap-3 p-3">
         {isImage ? (
           <ImageIcon className="h-4 w-4 text-pink-400 shrink-0" />
+        ) : isVideo ? (
+          <Film className="h-4 w-4 text-indigo-400 shrink-0" />
         ) : (
           <FileText className="h-4 w-4 text-blue-400 shrink-0" />
         )}
-        <span className="text-sm font-medium flex-1">{file.name}</span>
-        <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
+        <span className="text-sm font-medium flex-1 truncate">{file.name}</span>
+        <span className="text-xs text-muted-foreground">{sizeText}</span>
         <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={loadContent} disabled={loading}>
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
@@ -128,7 +137,17 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
           />
         </div>
       )}
-      {expanded && !isImage && content !== null && (
+      {expanded && isVideo && (
+        <div className="border-t border-border/50 p-4 bg-muted/20 flex justify-center">
+          <video
+            src={file.url}
+            controls
+            preload="metadata"
+            className="max-h-[520px] w-full rounded-lg bg-black"
+          />
+        </div>
+      )}
+      {expanded && !isImage && !isVideo && content !== null && (
         <div className="border-t border-border/50 p-4 bg-muted/20">
           <pre className="text-xs text-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
             {content}
@@ -324,12 +343,24 @@ export default function ReviewPage() {
 
           {/* Deliverables */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-blue-400" />
-                Deliverables
-              </CardTitle>
-              <CardDescription>{outputFiles.length} file(s) delivered</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-blue-400" />
+                  Deliverables
+                </CardTitle>
+                <CardDescription className="mt-1">{outputFiles.length} file(s) delivered</CardDescription>
+              </div>
+              {outputFiles.length > 1 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadFilesAsZip(outputFiles, `order-${id}-deliverables.zip`)}
+                >
+                  <Archive className="h-3.5 w-3.5 mr-1.5" />
+                  Download All (.zip)
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-2">
               {outputFiles.length === 0 ? (
@@ -514,8 +545,8 @@ export default function ReviewPage() {
                       <FileUpload
                         bucket="revision-feedback"
                         contextId={id}
-                        accept="image/*,application/pdf,text/*"
-                        maxFiles={5}
+                        accept="image/*,video/mp4,video/webm,video/quicktime,application/pdf,text/*"
+                        maxFiles={10}
                         onFilesChange={setRevisionFiles}
                       />
                     </div>

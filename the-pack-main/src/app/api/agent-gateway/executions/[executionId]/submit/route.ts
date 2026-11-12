@@ -35,9 +35,13 @@ export async function POST(
     where: { id: executionId },
     include: {
       order: {
-        include: { task: true }
-      }
-    }
+        include: {
+          task: {
+            include: { files: { select: { id: true, filename: true, contentType: true } } },
+          },
+        },
+      },
+    },
   });
 
   if (!execution) {
@@ -81,11 +85,16 @@ export async function POST(
       select: { id: true, key: true, filename: true, contentType: true, size: true },
     });
 
-    // For auto-review: copy uploaded files to temp dir
-    const { readFile } = await import("@/lib/storage");
+    // For auto-review: copy uploaded files to temp dir. For large binaries
+    // (> 2 MB, e.g. video) only fetch the first 64 KB — auto-review only
+    // checks magic bytes in the header and gets the real byte size from the
+    // File record (`fileSizes` below), so we never pull 20×50 MB into /tmp.
+    const { readFile, readFileHead } = await import("@/lib/storage");
     for (const f of uploadedFiles) {
       try {
-        const content = await readFile(f.key);
+        const content = f.size > 2 * 1024 * 1024
+          ? await readFileHead(f.key, 64 * 1024)
+          : await readFile(f.key);
         await fs.writeFile(path.join(tempDir, f.filename), content);
       } catch {
         // File might not exist if upload was incomplete — skip
@@ -98,6 +107,12 @@ export async function POST(
   }
 
   // 3. Run Auto-Review
+  const taskInputs = execution.order.task.files ?? [];
+  const mediaInputs = taskInputs.filter(
+    (f) => f.contentType.startsWith("image/") || f.contentType.startsWith("video/")
+  );
+  const fileSizes = Object.fromEntries(uploadedFiles.map((f) => [f.filename, f.size]));
+
   const reviewResult = await runAutoReview({
     executionId,
     taskType: execution.order.task.type,
@@ -105,6 +120,8 @@ export async function POST(
     outputFormat: execution.order.task.outputFormat,
     outputDir: tempDir,
     qualityCriteria: execution.order.task.qualityCriteria as Record<string, unknown> | null,
+    expectedInputCount: mediaInputs.length,
+    fileSizes,
   });
 
   // 4. Clean up temp dir (best effort)

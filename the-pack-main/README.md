@@ -46,8 +46,8 @@ thepack-app/                 ← git root
 2. **Full trading loop** — publish → take with my agent → escrow → autonomous execution with live plan/progress → auto-review → publisher review → settlement (10% fee) → reputation update.
 3. **Order state machine** — `CREATED → FUNDED → EXECUTING → REVIEW → (REVISION_REQUESTED ↺) → ACCEPTED → SETTLED`, plus `DISPUTED`, `REFUNDED`, `CANCELLED`.
 4. **Multi-round revisions** — publisher sends feedback (text + files), agent redoes the work; each round's deliverables stay viewable. Free rounds `x` per task + paid extra rounds `y` per order, both configurable (see below).
-5. **11 task types** — writing, editing, summarisation, translation, reports, data extraction, template filling, formatting, image generation, image editing, `CUSTOM` (unrestricted output).
-6. **Deliverables** — inline text, uploaded files (any size up to the bucket limit, see "File transfers"), **HTML deliverables with live sandboxed preview** + open-in-new-tab.
+5. **12 task types** — writing, editing, summarisation, translation, reports, data extraction, template filling, formatting, image generation, image editing (single or batch), **video processing (`VIDEO_EDITING` — trim/compress/transcode/subtitles/frames via ffmpeg)**, `CUSTOM` (unrestricted output).
+6. **Deliverables** — inline text, uploaded files (any size up to the bucket limit, see "File transfers"), **in-page `<video>` player** for MP4/WebM/MOV, **one-click "Download All (.zip)"** when multiple files are delivered, **HTML deliverables with live sandboxed preview** + open-in-new-tab.
 7. **Agent gateway (REST) + MCP server** — 13 MCP tools: `whoami`, `get_assigned_jobs`, `get_input_file`, `set_task_plan`, `report_progress`, `get_pending_tasks`, `claim_task`, `get_task_detail`, `submit_result`, `send_heartbeat`, `upload_file`, `submit_image_result`, `get_revision_feedback`. Public API reference: [guide/AGENT_API.md](./guide/AGENT_API.md); OpenClaw skill: [guide/openclaw/SKILL.md](./guide/openclaw/SKILL.md).
 8. **CLI-agnostic runner** — the "brain" is one env var: `AGENT_CLI=claude | hermes | codex`. Watchdog kills hung runs and requeues.
 9. **Sealed Docker sandbox** — no host mounts, fresh tmpfs workspace per job, non-root, optional egress allowlist (hardened mode). Reuses the owner's CLI login (no API key needed).
@@ -59,7 +59,7 @@ thepack-app/                 ← git root
 - **Payments are a mock balance** — Stripe not connected; **no self-serve top-up**. New accounts start at **$0** (no signup credit), so an admin must credit a balance before that account can fund a task.
 - **AI image generation** has no free headless route — agents fall back to drawing with code (PIL). See [guide/IMAGE_GENERATION_RESEARCH.md](./guide/IMAGE_GENERATION_RESEARCH.md).
 - Agent images are built by CI but **not yet published to GHCR** (needs an `agent-v*` tag + making the packages public), so the generated installer can't pull them yet.
-- Batch image / video tasks, dispute admin panel, email notifications, rate limiting.
+- Dispute admin panel, email notifications, rate limiting.
 
 ---
 
@@ -84,6 +84,8 @@ Copy [`guide/thepack.env`](./guide/thepack.env) to `.env`:
 | `PLATFORM_FEE_PERCENT` | – | Default 10 |
 | `AGENT_IMAGE_REPO`, `AGENT_IMAGE_VERSION` | – | Image the generated installer pins (e.g. `ghcr.io/<owner>/thepack-agent`, `1.0.0`) |
 | `FILE_FETCH_ALLOW_HOSTS` | – | Extra hosts the server may fetch agent `sourceUrl` uploads from (default `figma.com`) |
+| `NEXT_PUBLIC_MAX_TASK_FILES` | – | Max files per task / revision (default `20`) |
+| `MAX_VIDEO_FILE_MB`, `MAX_INPUT_FILE_MB`, `MAX_OUTPUT_FILE_MB` | – | Per-file size caps in MB (defaults: `50` video, `10` non-video inputs, `20` non-video outputs) |
 
 ### 3. Install & initialise
 ```bash
@@ -165,7 +167,7 @@ download: GET /api/files/[key] ──302──▶ short-lived signed Supabase UR
 | Browser (session) | `POST /api/files/upload-url` → PUT → `POST /api/files/complete` (used by `<FileUpload>`) |
 | Agent (Bearer key) | `POST /api/agent-gateway/files/upload-url` → PUT → `POST /api/agent-gateway/files/complete`; inputs via `GET /api/agent-gateway/files/[fileId]?signed=1` |
 
-The MCP client does this automatically for `upload_file` (filePath / base64) and `get_input_file`, and falls back to the legacy multipart / `?raw=1` routes against older servers. The legacy multipart routes still exist for small files. Bucket limits: inputs 10 MB, outputs 20 MB, avatars 2 MB, revision feedback 10 MB (Supabase free tier allows up to 50 MB per file).
+The MCP client does this automatically for `upload_file` (filePath / base64) and `get_input_file`, and falls back to the legacy multipart / `?raw=1` routes against older servers. The legacy multipart routes still exist for small files. Default limits: **video 50 MB** (inputs & outputs), non-video inputs 10 MB, non-video outputs 20 MB, avatars 2 MB, up to **20 files per task** — all configurable via env vars (Supabase free tier allows up to 50 MB per file).
 
 ---
 

@@ -1,9 +1,12 @@
 "use client";
 
-import { Download, ExternalLink, FileText } from "lucide-react";
+import { useState } from "react";
+import { Download, ExternalLink, FileText, Film, Archive, Loader2 } from "lucide-react";
+import { downloadFilesAsZip } from "@/lib/zip";
 
 const PREVIEWABLE = /\.(html?|svg|pdf|txt|md|json|csv)$/i;
 const IMAGE_NAME = /\.(png|jpe?g|webp|gif)$/i;
+const VIDEO_NAME = /\.(mp4|m4v|webm|mov)$/i;
 const HTML_NAME = /\.html?$/i;
 
 export type DeliverableFile = {
@@ -38,6 +41,7 @@ interface DeliverableFilesProps {
 
 function sizeLabel(size?: number): string | null {
   if (typeof size !== "number" || Number.isNaN(size)) return null;
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   return `${(size / 1024).toFixed(1)} KB`;
 }
 
@@ -46,16 +50,79 @@ export function DeliverableFiles({
   openUrlFor,
   compact = false,
 }: DeliverableFilesProps) {
+  const [zipping, setZipping] = useState(false);
+
   if (!files || files.length === 0) return null;
 
   const isImage = (f: DeliverableFile) =>
     f.type?.startsWith("image/") || IMAGE_NAME.test(f.name ?? "");
+  const isVideo = (f: DeliverableFile) =>
+    f.type?.startsWith("video/") || VIDEO_NAME.test(f.name ?? "");
 
   const imageFiles = files.filter(isImage);
-  const otherFiles = files.filter((f) => !isImage(f));
+  const videoFiles = files.filter((f) => !isImage(f) && isVideo(f));
+  const otherFiles = files.filter((f) => !isImage(f) && !isVideo(f));
+
+  const handleZip = async () => {
+    setZipping(true);
+    try {
+      await downloadFilesAsZip(files, "deliverables.zip");
+    } finally {
+      setZipping(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
+      {files.length > 1 && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+          <span className="text-xs text-muted-foreground">
+            {files.length} files delivered
+          </span>
+          <button
+            type="button"
+            onClick={handleZip}
+            disabled={zipping}
+            className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+          >
+            {zipping ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Archive className="h-3.5 w-3.5" />
+            )}
+            Download All (.zip)
+          </button>
+        </div>
+      )}
+
+      {videoFiles.length > 0 && (
+        <div className={compact ? "space-y-2" : "grid grid-cols-1 gap-3 sm:grid-cols-2"}>
+          {videoFiles.map((file, i) => (
+            <div key={`${file.name}-${i}`} className="overflow-hidden rounded-lg border bg-muted/30">
+              {!compact && file.url && (
+                <video
+                  src={file.url}
+                  controls
+                  preload="metadata"
+                  className="aspect-video w-full bg-black"
+                />
+              )}
+              <div className="flex items-center gap-2 px-3 py-2">
+                <Film className="h-4 w-4 shrink-0 text-indigo-400" />
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">{file.name}</span>
+                {sizeLabel(file.size) && (
+                  <span className="text-xs text-muted-foreground">{sizeLabel(file.size)}</span>
+                )}
+                {file.url && (
+                  <a href={file.url} download={file.name} title="Download">
+                    <Download className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {imageFiles.length > 0 && (
         <div className="grid grid-cols-2 gap-2">
           {imageFiles.map((file, i) => (

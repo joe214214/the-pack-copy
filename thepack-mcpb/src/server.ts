@@ -242,17 +242,17 @@ export function createServer() {
     }
   );
 
-  // 5b. upload_file — upload a binary file during execution (for image tasks)
+  // 5b. upload_file — upload a binary file during execution (for image/video/HTML tasks)
   server.tool(
     "upload_file",
-    "Upload a binary file (image, PDF, etc.) during task execution. Returns a fileId to pass to submit_result or submit_image_result. Three ways to provide the bytes, in order of preference: (1) `filePath` — ABSOLUTE path of a file you produced in your workspace; this server reads it from disk directly, so it works for files of ANY size (always use this for locally created files). (2) `sourceUrl` — an https URL a tool handed you (e.g. a Figma get_screenshot asset URL); the platform downloads it. (3) `base64Content` — only for tiny files (<100 KB); never paste large base64. Give exactly one of the three.",
+    "Upload a binary file (image, video, PDF, HTML, etc.) during task execution. Returns a fileId to pass to submit_result or submit_image_result. Call this once per output file (including for batch jobs with multiple outputs). Three ways to provide the bytes, in order of preference: (1) `filePath` — ABSOLUTE path of a file you produced in your workspace; this server reads it from disk and uploads directly to storage, so it works for files of ANY size up to the bucket limit (50 MB for video, 20 MB for other outputs — always use this for locally created files). (2) `sourceUrl` — an https URL a tool handed you (e.g. a Figma get_screenshot asset URL); the platform downloads it. (3) `base64Content` — only for tiny files (<100 KB); never paste large base64. Give exactly one of the three.",
     {
       executionId: z.string().describe("The execution ID of the current job"),
-      filename: z.string().describe("Filename including extension, e.g. 'result.png'"),
+      filename: z.string().describe("Filename including extension, e.g. 'result.png' or 'clip_trimmed.mp4'"),
       filePath: z.string().optional().describe("ABSOLUTE path to a local file you created (e.g. '/home/worker/jobs/job-x/result.png'). Preferred for anything you produced locally — any size works."),
       base64Content: z.string().optional().describe("Base64-encoded file content. Only for tiny files; omit if you pass filePath or sourceUrl."),
       sourceUrl: z.string().optional().describe("An https URL the server should download the file from (e.g. a Figma screenshot asset URL). Preferred for tool-hosted files."),
-      contentType: z.string().describe("MIME type of the file, e.g. 'image/png', 'image/jpeg', 'image/webp'")
+      contentType: z.string().describe("MIME type of the file, e.g. 'image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime'")
     },
     async (params) => {
       try {
@@ -279,7 +279,7 @@ export function createServer() {
   // 5c. submit_image_result — submit execution with uploaded file IDs
   server.tool(
     "submit_image_result",
-    "Submit the final result for an IMAGE_GENERATION or IMAGE_EDITING task. Use this after calling upload_file one or more times. Pass the fileIds returned from upload_file. Optionally include a textual description.",
+    "Submit the final result for an IMAGE_GENERATION, IMAGE_EDITING, or VIDEO_EDITING task (single or batch). Use this after calling upload_file one or more times. Pass all fileIds returned from upload_file. Optionally include a textual description.",
     {
       executionId: z.string().describe("The execution ID of the job"),
       fileIds: z.array(z.string()).describe("Array of fileIds returned from upload_file"),

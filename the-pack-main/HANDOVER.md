@@ -3008,3 +3008,24 @@ download: GET /api/files/[key] ─302─▶ signed URL (300 s)   — HTML/SVG/JS
   ~4.5 MB would still fail on Vercel — acceptable for now.
 
 ### State: committed and pushed to `feature/integrate-revision-system`.
+
+
+---
+
+## 2026-11-11 (later) — Batch image processing + Video processing (`VIDEO_EDITING`) + ZIP download
+
+### Summary
+1. **New task type `VIDEO_EDITING` ("Video Processing")**: publishers upload MP4/WebM/MOV clips (single or batch, up to 20 files, up to 50 MB each); sandbox agents process them with `ffmpeg`/`ffprobe` (trim, compress, transcode, burn subtitles, resize/crop, extract frames/GIF) and deliver via the direct-to-storage upload pipeline.
+2. **Batch image & video workflow**: raised attachment limit from 5/10 → **20 files per task** (configurable via `NEXT_PUBLIC_MAX_TASK_FILES` / `MAX_TASK_FILES`). Auto-review adds a `batch_count_match` check when a task has multiple media inputs, verifying the agent delivered at least one output per input.
+3. **Configurable size limits**: `MAX_VIDEO_FILE_MB` (default `50`), `MAX_INPUT_FILE_MB` (default `10`), `MAX_OUTPUT_FILE_MB` (default `20`). `scripts/provision-storage.mts` now calls `updateBucket` on existing buckets to sync their ceiling to 50 MB.
+4. **Auto-review memory optimization for large files**: `POST /api/agent-gateway/executions/[id]/submit` now fetches only the first 64 KB (`readFileHead`) for files > 2 MB and passes actual byte sizes via `fileSizes` to `runAutoReview`, avoiding pulling 20×50 MB into `/tmp`.
+5. **In-page video player + one-click ZIP download**: `DeliverableFiles` (order detail + revision history) and `OutputViewer` (review page) render `<video controls>` for MP4/WebM/MOV and show a **Download All (.zip)** button whenever multiple files are delivered (pure-TS STORE ZIP writer in `src/lib/zip.ts`, zero external deps).
+6. **Sandbox image**: added `ffmpeg` to `thepack-mcpb/sandbox/Dockerfile`.
+
+### Verified
+- `npx prisma db push` synced `TaskType.VIDEO_EDITING` to Supabase PostgreSQL.
+- `npm run storage:provision` updated `task-inputs`, `task-outputs`, `revision-feedback` buckets to 50 MB.
+- End-to-end check: MP4 direct upload → verify → signed download byte-identical; 25 MB MP4 allowed vs 25 MB PNG rejected; `VIDEO_EDITING` auto-review (score 1.0); batch image auto-review (1/3 fails `batch_count_match`, 3/3 passes); ZIP archive header & size verified.
+- `tsc --noEmit` clean on both `the-pack-main` and `thepack-mcpb`.
+
+### State: committed and pushed to `feature/integrate-revision-system`.

@@ -13,13 +13,16 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-// Mirrors MAX_FILE_SIZE in src/lib/storage.ts. The app validates size before
-// uploading; this is the backstop if that check is ever bypassed.
+// Ceiling on the bucket itself (50 MB = Supabase free-tier max, needed for
+// video). Per-type limits (10 MB non-video inputs, 20 MB non-video outputs,
+// 50 MB video) are enforced by validateFile() in src/lib/storage.ts before a
+// signed upload URL is issued.
+const VIDEO_LIMIT = `${Number(process.env.MAX_VIDEO_FILE_MB) || 50}MB`;
 const BUCKETS: Array<{ name: string; fileSizeLimit: string }> = [
-  { name: "task-inputs", fileSizeLimit: "10MB" },
-  { name: "task-outputs", fileSizeLimit: "20MB" },
+  { name: "task-inputs", fileSizeLimit: VIDEO_LIMIT },
+  { name: "task-outputs", fileSizeLimit: VIDEO_LIMIT },
   { name: "avatars", fileSizeLimit: "2MB" },
-  { name: "revision-feedback", fileSizeLimit: "10MB" },
+  { name: "revision-feedback", fileSizeLimit: VIDEO_LIMIT },
 ];
 
 async function main() {
@@ -47,7 +50,16 @@ async function main() {
   let created = 0;
   for (const bucket of BUCKETS) {
     if (have.has(bucket.name)) {
-      console.log(`  = ${bucket.name.padEnd(20)} already exists, left alone`);
+      const { error: updErr } = await supabase.storage.updateBucket(bucket.name, {
+        public: false,
+        fileSizeLimit: bucket.fileSizeLimit,
+      });
+      if (updErr) {
+        console.error(`  ! ${bucket.name.padEnd(20)} update FAILED: ${updErr.message}`);
+        process.exitCode = 1;
+      } else {
+        console.log(`  = ${bucket.name.padEnd(20)} exists → synced limit (${bucket.fileSizeLimit})`);
+      }
       continue;
     }
     const { error } = await supabase.storage.createBucket(bucket.name, {
