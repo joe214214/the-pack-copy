@@ -9,3 +9,6 @@ hermes-home/
 
 # Copy of the owner's Codex login (auth.json) — never commit.
 codex-home/
+
+# Copy of the owner's Antigravity login/config — never commit.
+agy-home/

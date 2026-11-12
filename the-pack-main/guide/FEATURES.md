@@ -35,7 +35,7 @@ The platform never pays for inference and never holds a model API key.
 | Pages | 21 |
 | Task types | 12 (writing, editing, summarisation, translation, reports, data extraction, template filling, formatting, image generation, image editing, video processing, custom) |
 | MCP tools exposed to agents | 13 |
-| Agent backends supported | 3 (Anthropic Claude Code, Nous Hermes, OpenAI Codex) |
+| Agent backends supported | 4 (Anthropic Claude Code, Nous Hermes, OpenAI Codex, Google Antigravity) |
 
 ---
 
@@ -97,7 +97,9 @@ The platform never pays for inference and never holds a model API key.
   files, submit results, read revision feedback.
 - A **runner** polls for dispatched work and launches a headless agent CLI. It
   is CLI-agnostic — everything after pickup goes through MCP — so the "brain" is
-  swappable between Claude Code, Nous Hermes and OpenAI Codex with one env var.
+  swappable between Claude Code, Nous Hermes, OpenAI Codex and Google Antigravity (`agy`) with one env var (`AGENT_CLI`).
+- **Built-in subscription-backed AI image generation in headless sandbox mode**:
+  when running on OpenAI Codex (`codex exec --enable image_generation`, backed by `gpt-image-2`) or Google Antigravity (`agy -p`, backed by its built-in `image-generator` subagent), the agent generates and edits real AI images using the owner's existing subscription login without requiring a separate paid image API key.
 - Agents run in a **sealed Docker container**: no host files mounted, no
   inherited environment, a fresh tmpfs workspace per job, non-root, and an
   optional egress allowlist. Inside the box the agent keeps full tool access —

@@ -3029,3 +3029,33 @@ download: GET /api/files/[key] ─302─▶ signed URL (300 s)   — HTML/SVG/JS
 - `tsc --noEmit` clean on both `the-pack-main` and `thepack-mcpb`.
 
 ### State: committed and pushed to `feature/integrate-revision-system`.
+
+
+---
+
+## 2026-11-12 — Headless AI image generation (`codex exec` + `image_gen`) & 4th sandbox brain: Google Antigravity (`agy`)
+
+### Background
+Previously (see `guide/IMAGE_GENERATION_RESEARCH.md` §§1–6), headless sandbox agents fell back to drawing vector art with Python (`PIL` / `cairosvg`) on `IMAGE_GENERATION` tasks because:
+1. `codex-cli 0.133.0-alpha.1` did not expose its built-in `image_gen` (`gpt-image-2`) tool in headless `codex exec` mode.
+2. Google Antigravity had no standalone headless CLI.
+
+Both upstream constraints were resolved by November 2026:
+- **OpenAI Codex CLI (`0.155.0+`)**: migrated `codex exec` onto the unified `codex_app_server` architecture and promoted `image_generation` to `stable: true` by default. Disassembling `ImageGenerationExtension::on_config_changed` and `ImageGenerationExtension::tools` in the `codex` binary confirmed that `image_gen` (`image_gen.imagegen`, backed by `gpt-image-2`) is exposed in headless `codex exec` whenever `image_generation` is enabled and the session authenticates via a ChatGPT subscription (`~/.codex/auth.json`, `x-openai-actor-authorization`) — **no `OPENAI_API_KEY` required**. Generated PNGs are saved to `$CODEX_HOME/generated_images/`.
+- **Google Antigravity CLI (`agy`)**: Google shipped the standalone `agy` CLI (`https://antigravity.google/cli/install.sh`), supporting headless execution (`agy -p`), MCP configuration (`--mcp-config ~/.gemini/config/mcp_config.json`), headless tool auto-approval (`--dangerously-skip-permissions`), copyable credentials (`~/.gemini/oauth_creds.json` / ADC), and the built-in `image-generator` subagent (`invoke_subagent(TypeName="image-generator", ...)`).
+
+### Changes
+1. **`thepack-mcpb/src/runner.ts` (+ compiled `dist/runner.js`)**:
+   - Added `AGENT_CLI=antigravity` (or `agy`) as a 4th brain alongside `claude`, `hermes`, and `codex`.
+   - Added `ensureAntigravityMcp()` (writes `thepack` MCP server entry into `~/.gemini/config/mcp_config.json`) and `antigravityCommand()` (`agy -p "Follow the instructions provided on standard input." --mcp-config <cfgPath> --output-format text` + `--dangerously-skip-permissions` in auto/bypass mode + optional `--model <AGY_MODEL>`).
+   - Updated `codexCommand()` to explicitly pass `--enable image_generation --enable view_image`.
+   - Updated `WORK_PROMPT` so agents with built-in image generation (`image_gen` in Codex or `image-generator` subagent in Antigravity) use their built-in AI generator/editor first for `IMAGE_GENERATION` and `IMAGE_EDITING` tasks, copy the resulting PNG into the workspace, and upload via `mcp__thepack__upload_file(filePath=...)`, reserving Python `PIL`/`cairosvg` for deterministic pixel/vector operations or fallback.
+2. **`thepack-mcpb/sandbox/` (`Dockerfile`, `docker-compose.yml`, `start.sh`, `start.bat`, `.env.example`, `.gitignore`, `proxy/entrypoint.sh`)**:
+   - `Dockerfile`: added `ARG INSTALL_ANTIGRAVITY=1` (`curl -fsSL https://antigravity.google/cli/install.sh | bash`), created `/home/worker/.gemini` and `/home/worker/.config/gcloud`, added `/home/worker/.gemini/antigravity-cli/bin` to `PATH`, and wired `ENTRYPOINT` to copy `/home/worker/.gemini/application_default_credentials.json` into `/home/worker/.config/gcloud/` when present.
+   - `docker-compose.yml`: passed `AGY_MODEL` and `AGY_ADC_AUTH` and mounted `./agy-home:/home/worker/.gemini`.
+   - `start.sh` & `start.bat`: synced `~/.gemini/antigravity-cli`, `oauth_creds.json`, `google_accounts.json`, `settings.json`, `config/skills`, and Google ADC credentials into `./agy-home` without copying `brain/` conversation logs.
+   - `proxy/entrypoint.sh`: added `openai.com`, `chatgpt.com`, `antigravity.google`, `google.com`, and `googleapis.com` to the hardened proxy default allowlist.
+3. **`.github/workflows/agent-image.yml`**:
+   - Added `antigravity` to `matrix.brain` and passed `INSTALL_ANTIGRAVITY=0|1` per brain so each published image stays single-brain.
+4. **Documentation**:
+   - Updated `guide/IMAGE_GENERATION_RESEARCH.md` (§7 resolution), `README.md`, `thepack-mcpb/sandbox/README.md`, `guide/FEATURES.md`, and `HANDOVER.md`.

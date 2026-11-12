@@ -56,7 +56,7 @@ COPY dist ./dist
 # Per-job scratch space (mounted as tmpfs at run time). The only host mount is
 # ./claude-home -> /home/worker/.claude (a COPY of your Claude login + skills),
 # so the boxed Claude runs on your subscription — no API key required.
-RUN mkdir -p /home/worker/jobs /home/worker/.claude /home/worker/.codex && chown -R worker:worker /home/worker
+RUN mkdir -p /home/worker/jobs /home/worker/.claude /home/worker/.codex /home/worker/.gemini /home/worker/.config/gcloud && chown -R worker:worker /home/worker
 USER worker
 ENV HOME=/home/worker
 ENV JOBS_DIR=/home/worker/jobs
@@ -69,7 +69,15 @@ ARG INSTALL_HERMES=1
 RUN if [ "$INSTALL_HERMES" = "1" ]; then \
       curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup; \
     fi
-ENV PATH=/home/worker/.local/bin:/home/worker/.hermes/bin:$PATH
+
+# Brain #4: Google Antigravity CLI (AGENT_CLI=antigravity or agy). Installed as
+# the worker user into ~/.local/bin (with fallback to the Python SDK wheel if the
+# standalone installer is unavailable on the build architecture).
+ARG INSTALL_ANTIGRAVITY=1
+RUN if [ "$INSTALL_ANTIGRAVITY" = "1" ]; then \
+      curl -fsSL https://antigravity.google/cli/install.sh | bash || true; \
+    fi
+ENV PATH=/home/worker/.local/bin:/home/worker/.hermes/bin:/home/worker/.antigravity/bin:$PATH
 
 # Inside the sealed container Claude runs with full tool access (RUNNER_BYPASS)
 # — safe because there is nothing here to steal and (hardened mode) nowhere to
@@ -83,9 +91,10 @@ ENV RUNNER_BYPASS=1
 #                                   login via the mounted ./claude-home; set this
 #                                   only if there is no Claude login to reuse.
 #   POLL_INTERVAL       (optional)  seconds, default 15
-#   AGENT_CLI           (optional)  "claude" (default), "hermes" or "codex"
+#   AGENT_CLI           (optional)  "claude" (default), "hermes", "codex", or "antigravity"
 #   HERMES_MODEL        (optional)  model override when AGENT_CLI=hermes
 #   CODEX_MODEL         (optional)  model override when AGENT_CLI=codex
+#   AGY_MODEL           (optional)  model override when AGENT_CLI=antigravity
 #
 # Codex reads its login from CODEX_HOME (~/.codex by default). ./codex-home is
 # mounted there read-write, the same arrangement as ./claude-home: it holds a
@@ -94,9 +103,14 @@ ENV RUNNER_BYPASS=1
 # host config.toml is deliberately NOT copied in, because its MCP servers point
 # at Windows paths that do not exist in the box.
 #
+# Antigravity (`agy`) reads its configuration and customizations from ~/.gemini
+# (mounted from ./agy-home) and can also authenticate headlessly via Google ADC
+# (`AGY_ADC_AUTH=true`) when ./agy-home/application_default_credentials.json is
+# present.
+#
 # Hermes keeps its credentials and config inside ~/.hermes, which also holds the
 # installed agent itself — so that directory cannot simply be mounted over the
 # way ./claude-home is. Instead the host copy is mounted read-only alongside it
 # and the few credential files are copied into place here, before the runner
 # starts.
-ENTRYPOINT ["sh", "-c", "if [ -d /home/worker/hermes-home ]; then mkdir -p /home/worker/.hermes/shared; cp -f /home/worker/hermes-home/auth.json /home/worker/hermes-home/config.yaml /home/worker/.hermes/ 2>/dev/null || true; cp -f /home/worker/hermes-home/shared/nous_auth.json /home/worker/.hermes/shared/ 2>/dev/null || true; fi; exec node dist/runner.js -k \"$THEPACK_AGENT_KEY\" -s \"$THEPACK_SERVER_URL\" -i \"${POLL_INTERVAL:-15}\""]
+ENTRYPOINT ["sh", "-c", "if [ -d /home/worker/hermes-home ]; then mkdir -p /home/worker/.hermes/shared; cp -f /home/worker/hermes-home/auth.json /home/worker/hermes-home/config.yaml /home/worker/.hermes/ 2>/dev/null || true; cp -f /home/worker/hermes-home/shared/nous_auth.json /home/worker/.hermes/shared/ 2>/dev/null || true; fi; if [ -f /home/worker/.gemini/application_default_credentials.json ]; then mkdir -p /home/worker/.config/gcloud; cp -f /home/worker/.gemini/application_default_credentials.json /home/worker/.config/gcloud/application_default_credentials.json 2>/dev/null || true; fi; exec node dist/runner.js -k \"$THEPACK_AGENT_KEY\" -s \"$THEPACK_SERVER_URL\" -i \"${POLL_INTERVAL:-15}\""]

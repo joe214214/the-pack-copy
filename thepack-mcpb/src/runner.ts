@@ -14,8 +14,9 @@
  *      whoami -> set_task_plan -> work + report_progress per step -> submit_result.
  *   4. Repeat.
  *
- * The "brain" is whichever CLI AGENT_CLI names — claude (default), hermes or
- * codex — running on the owner's own login, so there is no separate API key.
+ * The "brain" is whichever CLI AGENT_CLI names — claude (default), hermes,
+ * codex, or antigravity (agy) — running on the owner's own login, so there is
+ * no separate API key.
  *
  * Usage:
  *   node dist/runner.js -k <agent_api_key> [-s http://localhost:3000] [-i 15]
@@ -27,8 +28,8 @@
  */
 import { Command } from "commander";
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -64,26 +65,37 @@ const pollMs = Math.max(5, parseInt(opts.interval, 10) || 15) * 1000;
 // only changes how we launch it. Each CLI offers the two things this needs: a
 // headless one-shot mode, and MCP so our tools are callable.
 //
-//   claude  -> `claude -p`      (Anthropic Claude Code)
-//   hermes  -> `hermes -z`      (Nous Hermes Agent)
-//   codex   -> `codex exec`     (OpenAI Codex CLI)
+//   claude               -> `claude -p`      (Anthropic Claude Code)
+//   hermes               -> `hermes -z`      (Nous Hermes Agent)
+//   codex                -> `codex exec`     (OpenAI Codex CLI)
+//   antigravity / agy    -> `agy -p`         (Google Antigravity CLI)
 //
 // They differ in two ways that matter here:
-//   · how the prompt arrives — Claude and Codex read stdin, Hermes takes argv.
-//   · where MCP servers live — Claude takes a per-invocation --mcp-config,
+//   · how the prompt arrives — Claude, Codex, and Antigravity read stdin,
+//     Hermes takes argv.
+//   · where MCP servers live — Claude and Antigravity take a per-invocation
+//     --mcp-config (Antigravity also reads ~/.gemini/config/mcp_config.json),
 //     while Hermes and Codex keep a persistent config we register into once
 //     at startup.
 //
-// Set AGENT_CLI in the sandbox .env. HERMES_BIN / CODEX_BIN override the
-// executable path when the CLI is not on PATH under its own name.
+// Set AGENT_CLI in the sandbox .env. HERMES_BIN / CODEX_BIN / AGY_BIN override
+// the executable path when the CLI is not on PATH under its own name.
 const AGENT_CLI = (process.env.AGENT_CLI || "claude").trim().toLowerCase();
 const IS_HERMES = AGENT_CLI === "hermes";
 const IS_CODEX = AGENT_CLI === "codex";
-const IS_CLAUDE = !IS_HERMES && !IS_CODEX;
+const IS_ANTIGRAVITY = AGENT_CLI === "antigravity" || AGENT_CLI === "agy";
+const IS_CLAUDE = !IS_HERMES && !IS_CODEX && !IS_ANTIGRAVITY;
 const HERMES_BIN = (process.env.HERMES_BIN || "hermes").trim();
 const CODEX_BIN = (process.env.CODEX_BIN || "codex").trim();
+const AGY_BIN = (process.env.AGY_BIN || "agy").trim();
 /** How the brain is named in log lines the owner reads. */
-const BRAIN_LABEL = IS_HERMES ? "Hermes" : IS_CODEX ? "Codex" : "Claude";
+const BRAIN_LABEL = IS_HERMES
+  ? "Hermes"
+  : IS_CODEX
+    ? "Codex"
+    : IS_ANTIGRAVITY
+      ? "Antigravity"
+      : "Claude";
 
 const THEPACK_TOOLS = [
   "mcp__thepack__whoami",
@@ -125,7 +137,8 @@ const WORK_PROMPT = [
   "   e. Deliver in the exact form the task asks for. READ the task's outputFormat and description and pick the matching method — the publisher's stated output format wins over the task type:",
   "      - TEXT / markdown / or a link is requested: call mcp__thepack__submit_result with the executionId and the complete result as markdown (put any URL, e.g. a Figma link, inside the markdown).",
   "      - IMAGE(S) requested (the brief/outputFormat says image, PNG, screenshot, 'as an image', a picture, a mockup rendered as an image, or the task type is IMAGE_GENERATION / IMAGE_EDITING): deliver actual image file(s) via mcp__thepack__upload_file (once per output file) then mcp__thepack__submit_image_result(executionId, fileIds=[all returned ids], result note).",
-  "         · If you produced the file LOCALLY (Pillow, ffmpeg, any script — the normal case): call mcp__thepack__upload_file(executionId, filename, contentType, filePath=<ABSOLUTE path of the file in your workspace>). The upload server reads it from disk — works for any size. NEVER paste large base64.",
+  "         · If you have a built-in AI image generation tool or subagent (such as Codex's built-in `image_gen` / `image_gen.imagegen` tool, or Antigravity's built-in `image-generator` subagent via `invoke_subagent(TypeName=\"image-generator\", ...)` — neither of which requires an external API key): PREFER using it for photorealistic images, illustrations, concept art, mockups, and AI image edits (for local input images under Codex, call `view_image` first or pass `referenced_image_paths` so `image_gen` can edit them; under Antigravity, delegate to the `image-generator` subagent; only use Pillow/OpenCV when deterministic pixel/crop/filter/watermark batch operations are more appropriate). After generation finishes, copy the generated PNG from its output path (e.g. `$CODEX_HOME/generated_images/...` or the file path returned by `image-generator`) into your current working directory if needed, then upload it via `mcp__thepack__upload_file(executionId, filename, contentType='image/png', filePath=<ABSOLUTE path>)`.",
+  "         · If you produced the file LOCALLY (Pillow, ffmpeg, any script — or after copying a built-in `image_gen` output into your workspace): call mcp__thepack__upload_file(executionId, filename, contentType, filePath=<ABSOLUTE path of the file in your workspace>). The upload server reads it from disk — works for any size. NEVER paste large base64.",
   "         · If the image should be a Figma / FigJam design: FIRST create it with the Figma tools (mcp__claude_ai_Figma__generate_diagram for a flowchart/diagram, or use_figma for a design). THEN render it with mcp__claude_ai_Figma__get_screenshot, passing fileKey (extracted from the board/design URL) and nodeId \"0:1\" (the whole board). get_screenshot returns an image_url — DO NOT set enableBase64Response and DO NOT paste base64. Instead call mcp__thepack__upload_file(executionId, filename='design.png', contentType='image/png', sourceUrl=<the image_url from get_screenshot>) — the ThePack server downloads the PNG itself. Then submit_image_result. Include the Figma link in your submit note too.",
   "         · base64Content is a last resort for tiny files (<100 KB) only.",
   "      - VIDEO /VIDEO_EDITING requested (trim, compress, transcode, resize/crop, add/burn subtitles, extract frames/GIF, or batch video processing): inspect inputs with `ffprobe`, process with `ffmpeg -y` into web-playable output (`-c:v libx264 -pix_fmt yuv420p -movflags +faststart -c:a aac` for MP4 unless the brief specifies another codec/container, max 50 MB per file), upload each output via mcp__thepack__upload_file(executionId, filename, contentType='video/mp4' | 'video/webm' | 'video/quicktime' | 'image/gif' | 'image/png', filePath=<ABSOLUTE path>), then submit via mcp__thepack__submit_result(executionId, result=<summary of operations, durations, and resolutions>, fileIds=[all returned ids]).",
@@ -217,6 +230,37 @@ async function ensureCodexMcp(): Promise<void> {
       ? "ThePack MCP server registered with Codex."
       : `WARNING: could not register the ThePack MCP server with Codex (exit ${code}). The agent will not be able to fetch or submit jobs.`
   );
+}
+
+// Antigravity (`agy`) reads global MCP servers from `~/.gemini/config/mcp_config.json`
+// in addition to supporting `--mcp-config <path>`. Writing `thepack` into the
+// global config at startup guarantees that both the primary agent and any
+// spawned subagents discover the ThePack MCP tools automatically.
+function ensureAntigravityMcp(): void {
+  try {
+    const geminiConfigDir = path.join(homedir(), ".gemini", "config");
+    mkdirSync(geminiConfigDir, { recursive: true });
+    const mcpConfigFile = path.join(geminiConfigDir, "mcp_config.json");
+    let existing: { mcpServers?: Record<string, unknown> } = {};
+    if (existsSync(mcpConfigFile)) {
+      try {
+        existing = JSON.parse(readFileSync(mcpConfigFile, "utf8"));
+      } catch {
+        existing = {};
+      }
+    }
+    const mcpServers = existing.mcpServers && typeof existing.mcpServers === "object"
+      ? existing.mcpServers
+      : {};
+    mcpServers.thepack = {
+      command: "node",
+      args: [mcpEntry, "-k", agentKey, "-s", serverUrl],
+    };
+    writeFileSync(mcpConfigFile, JSON.stringify({ ...existing, mcpServers }, null, 2));
+    log("ThePack MCP server registered with Antigravity (~/.gemini/config/mcp_config.json).");
+  } catch (e) {
+    log(`WARNING: could not write ~/.gemini/config/mcp_config.json for Antigravity: ${(e as Error).message}`);
+  }
 }
 
 async function api(endpoint: string, init?: RequestInit) {
@@ -342,6 +386,12 @@ function codexCommand(workDir: string): { cmd: string; args: string[] } {
   // `cwd` the other two CLIs get.
   args.push("-C", workDir);
 
+  // Explicitly ensure the built-in image_generation extension (`image_gen` /
+  // `image_gen.imagegen` backed by `gpt-image-2` on the owner's ChatGPT
+  // subscription — no OPENAI_API_KEY needed) and `view_image` (for loading
+  // local input files before editing) are enabled in headless `codex exec`.
+  args.push("--enable", "image_generation", "--enable", "view_image");
+
   // Left unset on purpose by default. A Codex signed in with a ChatGPT
   // subscription refuses EVERY explicit model with "The '<name>' model is not
   // supported when using Codex with a ChatGPT account" — measured against
@@ -371,6 +421,24 @@ function codexCommand(workDir: string): { cmd: string; args: string[] } {
   }
 
   return { cmd: CODEX_BIN, args };
+}
+
+// How to launch the Google Antigravity CLI (`agy`) for one job. Like Claude it
+// supports headless `-p` (reading the full prompt from stdin) and `--mcp-config`,
+// and has a built-in `image-generator` subagent on the owner's subscription.
+function antigravityCommand(): { cmd: string; args: string[] } {
+  const args = ["-p", "Follow the instructions provided on standard input.", "--mcp-config", cfgPath, "--output-format", "text"];
+
+  const model = (process.env.AGY_MODEL || "").trim();
+  if (model) args.push("--model", model);
+
+  if (process.env.RUNNER_BYPASS === "1") {
+    args.push("--dangerously-skip-permissions");
+  } else {
+    args.push("--mode", "auto");
+  }
+
+  return { cmd: AGY_BIN, args };
 }
 
 function runAgent(): Promise<void> {
@@ -413,6 +481,16 @@ function runAgent(): Promise<void> {
       // On Windows the CLI is a .cmd shim that only a shell can resolve. Safe
       // to route through one here because argv carries flags only — the
       // multi-KB prompt goes over stdin and never meets a quoting rule.
+      child = isWin
+        ? spawn(`${cmd} ${args.map(winQuote).join(" ")}`, {
+            shell: true,
+            cwd: workDir,
+          })
+        : spawn(cmd, args, { shell: false, cwd: workDir, detached: true });
+    } else if (IS_ANTIGRAVITY) {
+      // Antigravity (`agy`) reads the full instruction from stdin in `-p` mode
+      // and loads the ThePack MCP server via `--mcp-config` (plus ~/.gemini/config/mcp_config.json).
+      const { cmd, args } = antigravityCommand();
       child = isWin
         ? spawn(`${cmd} ${args.map(winQuote).join(" ")}`, {
             shell: true,
@@ -477,12 +555,18 @@ function runAgent(): Promise<void> {
       finish();
     }, timeoutMs);
 
-    // Claude and Codex read the instruction from stdin; Hermes already has it
-    // in argv.
+    // Claude, Codex, and Antigravity read the instruction from stdin; Hermes
+    // already has it in argv.
     if (!IS_HERMES) child.stdin.write(WORK_PROMPT);
     child.stdin.end();
 
-    const binName = IS_HERMES ? HERMES_BIN : IS_CODEX ? CODEX_BIN : "claude";
+    const binName = IS_HERMES
+      ? HERMES_BIN
+      : IS_CODEX
+        ? CODEX_BIN
+        : IS_ANTIGRAVITY
+          ? AGY_BIN
+          : "claude";
 
     child.stdout.on("data", (d) => process.stdout.write(d));
     child.stderr.on("data", (d) => process.stderr.write(d));
@@ -552,6 +636,11 @@ if (IS_HERMES) {
   log(
     "Note: Codex has no per-tool allowlist, so connector approval is not enforced at the tool level — isolation comes from the sandbox container."
   );
+} else if (IS_ANTIGRAVITY) {
+  const externallySandboxed = process.env.RUNNER_BYPASS === "1";
+  log(
+    `Brain: local '${AGY_BIN}' CLI (Google Antigravity), model=${process.env.AGY_MODEL?.trim() || "account default"} (${externallySandboxed ? "bypass perms inside container" : "auto mode"}).`
+  );
 } else {
   log(
     `Brain: local 'claude' CLI, model=${process.env.CLAUDE_MODEL?.trim() || "account default"} (${process.env.RUNNER_BYPASS === "1" ? "bypass perms" : "local tools + ThePack tools"}; connectors gated by owner approval).`
@@ -559,12 +648,13 @@ if (IS_HERMES) {
 }
 log("Leave this running. Assign tasks to this agent on the website — they'll be handled automatically.");
 
-// Hermes and Codex both need the ThePack MCP server written into their own
-// persistent config before the first job; Claude gets the same wiring per-run
-// via --mcp-config.
+// Hermes, Codex, and Antigravity write the ThePack MCP server into their own
+// persistent config before the first job; Claude (and Antigravity) also get the
+// same wiring per-run via --mcp-config.
 async function start() {
   if (IS_HERMES) await ensureHermesMcp();
   else if (IS_CODEX) await ensureCodexMcp();
+  else if (IS_ANTIGRAVITY) ensureAntigravityMcp();
   else void refreshApprovedConnectors();
   void tick();
   setInterval(() => void tick(), pollMs);

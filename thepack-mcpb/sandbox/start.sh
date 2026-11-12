@@ -58,6 +58,28 @@ else
   echo "No Codex login found at $HOST_CODEX — only needed if you set AGENT_CLI=codex."
 fi
 
+# Fourth brain: copy Google Antigravity (`agy`) config/credentials + skills into
+# ./agy-home (mounted at /home/worker/.gemini). Conversations/brain transcripts
+# are deliberately NOT copied so private history never enters the sandbox.
+HOST_AGY="${HOST_AGY_DIR:-$HOME/.gemini}"
+mkdir -p ./agy-home/config ./agy-home/antigravity-cli
+if [ -d "$HOST_AGY/antigravity-cli" ]; then
+  cp -rf "$HOST_AGY/antigravity-cli/." ./agy-home/antigravity-cli/ 2>/dev/null || true
+fi
+for f in oauth_creds.json google_accounts.json settings.json; do
+  [ -f "$HOST_AGY/$f" ] && cp -f "$HOST_AGY/$f" "./agy-home/$f"
+done
+if [ -d "$HOST_AGY/config/skills" ]; then
+  rm -rf ./agy-home/config/skills
+  cp -rf "$HOST_AGY/config/skills" ./agy-home/config/skills
+fi
+if [ -f "${HOME}/.config/gcloud/application_default_credentials.json" ]; then
+  cp -f "${HOME}/.config/gcloud/application_default_credentials.json" ./agy-home/application_default_credentials.json
+  echo "Reusing your Antigravity / Google ADC login for AGENT_CLI=antigravity."
+elif [ -d "$HOST_AGY" ]; then
+  echo "Prepared Antigravity config from $HOST_AGY."
+fi
+
 # Pass "hardened" to add the egress-allowlist network wall.
 if [ "$1" = "hardened" ]; then
   echo "Building and starting the sealed sandbox (HARDENED: egress allowlist)…"

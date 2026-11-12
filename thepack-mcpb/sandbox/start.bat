@@ -59,6 +59,27 @@ if exist "%HOST_CODEX%\auth.json" (
   echo No Codex login found at %HOST_CODEX% - that is only needed if you set AGENT_CLI=codex.
 )
 
+REM Fourth brain: copy Google Antigravity (`agy`) config/credentials + skills
+REM into agy-home (mounted at /home/worker/.gemini). Private brain transcripts
+REM are deliberately NOT copied.
+set "HOST_AGY=%HOST_AGY_DIR%"
+if "%HOST_AGY%"=="" set "HOST_AGY=%USERPROFILE%\.gemini"
+if not exist agy-home\config mkdir agy-home\config
+if not exist agy-home\antigravity-cli mkdir agy-home\antigravity-cli
+if exist "%HOST_AGY%\antigravity-cli" (
+  xcopy /E /I /Y "%HOST_AGY%\antigravity-cli" agy-home\antigravity-cli >nul
+)
+if exist "%HOST_AGY%\oauth_creds.json" copy /Y "%HOST_AGY%\oauth_creds.json" agy-home\oauth_creds.json >nul
+if exist "%HOST_AGY%\google_accounts.json" copy /Y "%HOST_AGY%\google_accounts.json" agy-home\google_accounts.json >nul
+if exist "%HOST_AGY%\settings.json" copy /Y "%HOST_AGY%\settings.json" agy-home\settings.json >nul
+if exist "%HOST_AGY%\config\skills" (
+  xcopy /E /I /Y "%HOST_AGY%\config\skills" agy-home\config\skills >nul
+)
+if exist "%APPDATA%\gcloud\application_default_credentials.json" (
+  copy /Y "%APPDATA%\gcloud\application_default_credentials.json" agy-home\application_default_credentials.json >nul
+  echo Reusing your Antigravity / Google ADC login for AGENT_CLI=antigravity.
+)
+
 REM Pass "hardened" to add the egress-allowlist network wall.
 if "%1"=="hardened" (
   echo Building and starting the sealed sandbox ^(HARDENED: egress allowlist^)...

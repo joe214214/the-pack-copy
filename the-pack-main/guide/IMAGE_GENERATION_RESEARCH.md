@@ -1,10 +1,8 @@
 # Image generation for ThePack agents — research findings
 
-**Status:** unresolved by any free route. Recommendation is a paid image API.
-**Investigated:** 2026-09-01 → 2026-09-18
-**Audience:** whoever picks this up next. You were not in the original session, so
-every claim below carries the evidence that produced it — commands, versions and
-verbatim error text — so you can re-verify rather than trust it.
+**Status:** ✅ **RESOLVED (2026-11-12)** — both **OpenAI Codex CLI (`codex-cli >= 0.155.0`)** and **Google Antigravity CLI (`agy`)** now expose built-in subscription-backed AI image generation in headless sandbox mode without requiring a separate paid API key. See [§7. Resolution (2026-11-12)](#7-resolution-2026-11-12--headless-image-generation-shipped).
+**Original investigation:** 2026-09-01 → 2026-09-18 (preserved below in §§1–6 for historical context) · **Resolved:** 2026-11-12
+**Audience:** whoever picks this up next. Every claim below carries the evidence that produced it — commands, binary symbols, versions and verbatim error text — so you can re-verify rather than trust it.
 
 ---
 
@@ -239,9 +237,47 @@ So switching providers later is a config change, not a rewrite.
    cost folded into the platform fee. This is a business decision with billing
    and abuse-control implications.
 3. **Re-check Codex** — it is alpha software. If `image_gen` ever appears in
-   `codex exec`, revisit §2.6; it would be the cheapest good answer.
+   `codex exec`, revisit §2.6; it would be the cheapest good answer. *(Resolved in `0.155.0` — see §7 below.)*
 4. **Commercial terms, unrelated to images but urgent** — ThePack currently reuses
    *personal* Claude/Hermes/ChatGPT subscriptions to do paid work for third
    parties. That is very likely outside consumer terms. Before launch this needs
    to move to proper API credentials or a commercial agreement. Worth confirming
    with each vendor.
+
+---
+
+## 7. Resolution (2026-11-12) — Headless image generation shipped
+
+Both §2.4 (Antigravity) and §2.6 (Codex CLI) changed upstream between September and November 2026, closing the headless gap completely. Both are now wired into `thepack-mcpb`.
+
+### 7.1 OpenAI Codex CLI (`0.155.0+`) — `image_gen` (`gpt-image-2`) in `codex exec`
+
+In September (`0.133.0-alpha.1`), `codex exec` bypassed the `codex_app_server` extension registry, so `ImageGenerationExtension` was only registered in interactive TUI sessions.
+
+By `codex-cli 0.155.0`:
+1. **`codex exec` was migrated onto the unified `codex_app_server` in-process client** (verified via `codex features list` and symbol disassembly of `/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex`).
+2. **`image_generation` was promoted to `stable: true` by default** (`codex features list` → `image_generation | stable | true`).
+3. **Disassembly of `ImageGenerationExtension::on_config_changed` and `ImageGenerationExtension::tools`** confirmed the exact gate:
+   - Feature flag `image_generation` enabled, **and**
+   - Model provider is `"OpenAI"` (`model_provider_id == "openai"`) or carries `x-openai-actor-authorization` (ChatGPT Plus/Pro/Team subscription login via `~/.codex/auth.json`).
+   - When active, it exposes the built-in `image_gen` (`image_gen.imagegen`, backed by `gpt-image-2`) tool and extracts the embedded system skill to `$CODEX_HOME/skills/.system/imagegen/SKILL.md`.
+   - Generated PNGs are saved automatically under `$CODEX_HOME/generated_images/` with **no `OPENAI_API_KEY` required**.
+
+### 7.2 Google Antigravity CLI (`agy`) — headless `-p` + built-in `image-generator` subagent
+
+In September (§2.4), Antigravity was only available as an Electron GUI app. Google subsequently shipped the standalone **Antigravity CLI (`agy`)**:
+- **Installable in Linux/macOS containers**: `curl -fsSL https://antigravity.google/cli/install.sh | bash` (installs to `~/.gemini/antigravity-cli/bin/agy`).
+- **Headless mode + MCP**: `agy -p "<prompt>" --mcp-config ~/.gemini/config/mcp_config.json --output-format text --dangerously-skip-permissions`.
+- **Copyable auth**: reuses `~/.gemini/oauth_creds.json`, `google_accounts.json`, `settings.json`, or Google Application Default Credentials (`AGY_ADC_AUTH=true` + `application_default_credentials.json`).
+- **Built-in AI image generation & editing**: exposes the `image-generator` subagent (`invoke_subagent(TypeName="image-generator", Role="...", Prompt="...")`), which generates or edits images on the user's Antigravity subscription and returns the saved file path on disk.
+
+### 7.3 What was wired in `thepack-mcpb`
+
+- **`thepack-mcpb/src/runner.ts`**:
+  - Added `AGENT_CLI=antigravity` (or `agy`) as a 4th supported brain alongside `claude`, `hermes`, and `codex`.
+  - Added `ensureAntigravityMcp()` (writes `thepack` MCP server config into `~/.gemini/config/mcp_config.json`) and `antigravityCommand()`.
+  - Updated `codexCommand()` to explicitly pass `--enable image_generation --enable view_image`.
+  - Updated `WORK_PROMPT` so agents running on Codex or Antigravity use their built-in `image_gen` / `image-generator` tool first for `IMAGE_GENERATION` and `IMAGE_EDITING` tasks, copy the output PNG into the task workspace, and upload it via `mcp__thepack__upload_file(filePath=...)`, reserving PIL/Pillow/cairosvg for deterministic geometric tasks or fallback.
+- **`thepack-mcpb/sandbox/` (`Dockerfile`, `docker-compose.yml`, `start.sh`, `start.bat`, `proxy/entrypoint.sh`, `.env.example`)**:
+  - Added `ARG INSTALL_ANTIGRAVITY=1` to `Dockerfile`, syncing `~/.gemini` credentials into `./agy-home` (`/home/worker/.gemini`) in `start.sh` / `start.bat` without copying `brain/` conversation transcripts.
+  - Added `openai.com`, `chatgpt.com`, `antigravity.google`, `google.com`, and `googleapis.com` to the hardened egress proxy default allowlist.

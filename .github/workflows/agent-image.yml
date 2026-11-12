@@ -5,9 +5,10 @@
 # times the download for tools they will never invoke.
 #
 # Published as:
-#   ghcr.io/<owner>/thepack-agent:claude-<version>   + :claude  (moving tag)
-#   ghcr.io/<owner>/thepack-agent:hermes-<version>   + :hermes
-#   ghcr.io/<owner>/thepack-agent:codex-<version>    + :codex
+#   ghcr.io/<owner>/thepack-agent:claude-<version>       + :claude  (moving tag)
+#   ghcr.io/<owner>/thepack-agent:hermes-<version>       + :hermes
+#   ghcr.io/<owner>/thepack-agent:codex-<version>        + :codex
+#   ghcr.io/<owner>/thepack-agent:antigravity-<version>  + :antigravity
 #
 # The installer the dashboard generates pins the exact version tag, so a
 # customer's agent never changes under them; the moving tag is for docs.
@@ -37,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        brain: [claude, hermes, codex]
+        brain: [claude, hermes, codex, antigravity]
 
     steps:
       - uses: actions/checkout@v4
@@ -52,20 +53,27 @@ jobs:
           fi
           echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      # Only the selected brain is installed; the other two are switched off.
+      # Only the selected brain is installed; the others are switched off.
       - name: Work out the build args
         id: args
         run: |
           case "${{ matrix.brain }}" in
             claude) echo "flags=INSTALL_CLAUDE=1
           INSTALL_HERMES=0
-          INSTALL_CODEX=0" >> "$GITHUB_OUTPUT" ;;
+          INSTALL_CODEX=0
+          INSTALL_ANTIGRAVITY=0" >> "$GITHUB_OUTPUT" ;;
             hermes) echo "flags=INSTALL_CLAUDE=0
           INSTALL_HERMES=1
-          INSTALL_CODEX=0" >> "$GITHUB_OUTPUT" ;;
+          INSTALL_CODEX=0
+          INSTALL_ANTIGRAVITY=0" >> "$GITHUB_OUTPUT" ;;
             codex)  echo "flags=INSTALL_CLAUDE=0
           INSTALL_HERMES=0
-          INSTALL_CODEX=1" >> "$GITHUB_OUTPUT" ;;
+          INSTALL_CODEX=1
+          INSTALL_ANTIGRAVITY=0" >> "$GITHUB_OUTPUT" ;;
+            antigravity) echo "flags=INSTALL_CLAUDE=0
+          INSTALL_HERMES=0
+          INSTALL_CODEX=0
+          INSTALL_ANTIGRAVITY=1" >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: Build the runner

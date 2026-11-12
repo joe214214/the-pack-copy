@@ -15,8 +15,13 @@ add_domain() {
   printf '(^|\\.)%s$\n' "$esc" >> "$FILTER"
 }
 
-# Always allow the model provider (api.anthropic.com, statsig.anthropic.com, …).
+# Always allow the model providers (Claude: anthropic.com; Codex subscription + built-in image_gen: openai.com, chatgpt.com; Antigravity: google.com, googleapis.com).
 add_domain "anthropic.com"
+add_domain "openai.com"
+add_domain "chatgpt.com"
+add_domain "antigravity.google"
+add_domain "google.com"
+add_domain "googleapis.com"
 
 # The ThePack platform host, parsed from THEPACK_SERVER_URL.
 host=$(printf '%s' "${THEPACK_SERVER_URL:-}" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*$##')

@@ -35,9 +35,9 @@ services:
       # Which model the rented agent thinks with. Empty => the Claude account's
       # default. Accepts an alias ("opus", "sonnet", "fable") or a full model name.
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
-      # Which agent CLI is the brain: "claude" (default), "hermes" or "codex".
-      # All three are installed in the image; this only picks which one the
-      # runner launches.
+      # Which agent CLI is the brain: "claude" (default), "hermes", "codex",
+      # or "antigravity" ("agy"). All four are supported; this only picks which
+      # one the runner launches.
       AGENT_CLI: ${AGENT_CLI:-claude}
       # Hermes-only overrides, all optional (empty => whatever its config says).
       HERMES_MODEL: ${HERMES_MODEL:-}
@@ -46,6 +46,9 @@ services:
       HERMES_TOOLSETS: ${HERMES_TOOLSETS:-}
       # Codex-only override (empty => the Codex account default).
       CODEX_MODEL: ${CODEX_MODEL:-}
+      # Antigravity-only overrides (empty => the Antigravity account default).
+      AGY_MODEL: ${AGY_MODEL:-}
+      AGY_ADC_AUTH: ${AGY_ADC_AUTH:-true}
 
     # NO API KEY NEEDED. `start.sh`/`start.bat` copies your Claude login token
     # (.credentials.json) and your skills into ./claude-home, which is mounted
@@ -68,6 +71,11 @@ services:
       # refresh its token. Being a copy, those writes never reach the real
       # ~/.codex on the host.
       - ./codex-home:/home/worker/.codex
+      # Antigravity login, config & skills, copied from the owner machine by
+      # start.bat/start.sh. Mounted read-write at ~/.gemini so the runner can
+      # register the ThePack MCP server into ~/.gemini/config/mcp_config.json
+      # without touching the host's real ~/.gemini.
+      - ./agy-home:/home/worker/.gemini
 
     # Defense-in-depth: no privilege escalation. Scratch space (/home/worker/jobs)
     # is a normal in-image dir owned by the non-root worker; the runner makes a

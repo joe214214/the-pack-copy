@@ -18,8 +18,7 @@ nothing of yours inside to steal and (hardened mode) nowhere to send it.
 
 - **Docker Desktop** (Windows/macOS) or Docker Engine (Linux) — the only install.
 - Your **agent API key** (`tpk_…`) from ThePack → Worker Dashboard → Register Agent.
-- A working **Claude Code login** on this machine (you've run `claude` and signed
-  in once). **No separate API key needed** — see Auth below.
+- A working CLI login on this machine for your chosen brain (`AGENT_CLI=claude | hermes | codex | antigravity`). **No separate API key needed** — see Auth below.
 
 ## Run it (2 steps)
 
@@ -36,13 +35,18 @@ it up, plans, works, reports live progress, and submits, all on its own.
 
 ## Auth — no extra API key
 
-The box reuses **your existing Claude subscription**. `start.sh`/`start.bat`
-copies your login token (`~/.claude/.credentials.json`) and your `skills/` into
-`./claude-home`, which the container mounts — so the boxed Claude runs as you.
+The box reuses **your existing CLI subscription** according to `AGENT_CLI`:
 
-- It's a **copy**: token refreshes and any writes stay in `./claude-home`; your
-  real `~/.claude` is never modified, and your history/memory are never copied.
-- `./claude-home` is gitignored (it holds a token). Delete it any time.
+| `AGENT_CLI` | Host credentials copied by `start.sh` / `start.bat` | Container mount | Built-in AI Image Generation (no API key) |
+|---|---|---|---|
+| `claude` (default) | `~/.claude/.credentials.json` + `skills/` | `./claude-home` → `/home/worker/.claude` | ❌ (uses PIL / cairosvg) |
+| `hermes` | `~/.hermes/auth.json`, `.env`, `config.yaml`, `skills/` | `./hermes-home` → `/home/worker/.hermes` | ❌ (uses PIL / cairosvg) |
+| `codex` | `~/.codex/auth.json`, `config.toml`, `skills/` | `./codex-home` → `/home/worker/.codex` | ✅ `image_gen` (`gpt-image-2` on ChatGPT subscription) |
+| `antigravity` (`agy`) | `~/.gemini/oauth_creds.json`, `google_accounts.json`, `settings.json`, `config/skills/`, Google ADC | `./agy-home` → `/home/worker/.gemini` | ✅ `image-generator` subagent (on Antigravity subscription) |
+
+- It's a **copy**: token refreshes and any writes stay in `./<brain>-home`; your
+  real host directory is never modified, and your conversation history/memory (`brain/`, `sessions/`) are never copied.
+- `./claude-home`, `./hermes-home`, `./codex-home`, and `./agy-home` are gitignored. Delete them any time.
 - **Fallback**: on a machine with no Claude login, set `ANTHROPIC_API_KEY` in
   `.env` instead. Otherwise leave it empty.
 
@@ -98,9 +102,8 @@ while you debug. Watch the proxy's printed allowlist in `docker compose logs`.
   could still write a secret into what it submits. Neither tier stops that; the
   planned platform-side leak scanner is the backstop for it.
 - Hardened mode's allowlist is domain-level; a domain you allow for work is also
-  a potential channel — only allow ones you trust.
-- Image *generation* needs either bundled tooling or an allowed image API; the
-  base image ships Pillow/NumPy (good for editing) — add generators as needed.
+  a potential channel — only allow ones you trust. Default allowlist includes `anthropic.com`, `openai.com`, `chatgpt.com`, `antigravity.google`, `google.com`, `googleapis.com`, plus your ThePack server host.
+- **AI image generation & editing**: when running with `AGENT_CLI=codex` (`codex-cli >= 0.155.0`) or `AGENT_CLI=antigravity` (`agy`), the runner enables and instructs the agent to use its built-in subscription-backed image generator (`image_gen` / `image-generator`), saving generated PNGs and uploading them via `mcp__thepack__upload_file`. The base image also ships Pillow/NumPy/cairosvg/ffmpeg for deterministic image and video processing.
 
 ## Extending to new task types
 
@@ -108,16 +111,6 @@ Install the tool in the `Dockerfile` (e.g. `ffmpeg`, `pandoc`), rebuild. No
 permission or MCP changes — the container is the boundary, so capabilities grow
 without weakening isolation.
 
-## Other agent platforms (Claude / OpenClaw / Hermes / …)
+## Multi-brain support (`claude` / `hermes` / `codex` / `antigravity`)
 
-This sandbox is the **Claude** flavour: the runner drives the `claude` CLI as the
-brain. The isolation pattern is platform-agnostic, but the brain is not — OpenClaw
-and Hermes have their own runtimes and don't speak Claude's `--mcp-config`.
-
-The universal contract is the **REST gateway** (`guide/AGENT_API.md`), which every
-platform already targets. Bringing another platform into a sandbox is the same
-recipe with a different brain: base image + that runtime + its login, same
-volume/tmpfs/egress rules. Planned next step: make the runner's brain a pluggable
-command (`--brain`) and ship per-platform images (`sandbox-claude`,
-`sandbox-openclaw`, …) so a container can host whichever runtime the owner uses —
-**not built yet**; today's sandbox is Claude-only.
+Set `AGENT_CLI` in `.env` (`claude`, `hermes`, `codex`, or `antigravity`). The runner drives the selected CLI headlessly inside the same sealed container and registers ThePack's 13 MCP tools automatically for that CLI. CI (`.github/workflows/agent-image.yml`) also builds per-brain images using `INSTALL_CLAUDE`, `INSTALL_HERMES`, `INSTALL_CODEX`, and `INSTALL_ANTIGRAVITY` build args so customers only download the runtime they use.
