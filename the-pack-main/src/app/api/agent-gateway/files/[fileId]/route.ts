@@ -12,7 +12,7 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/agent-auth";
 import { prisma } from "@/lib/prisma";
-import { readFile, StorageError } from "@/lib/storage";
+import { readFile, getSignedDownloadUrl, StorageError } from "@/lib/storage";
 
 const TEXT_TYPES = ["text/", "application/json", "application/xml", "image/svg+xml"];
 
@@ -38,12 +38,24 @@ export async function GET(
   }
 
   try {
+    const params2 = new URL(request.url).searchParams;
+
+    // ?signed=1 → JSON { url, filename, contentType, size } with a short-lived
+    // direct storage URL. The agent then downloads WITHOUT our auth header and
+    // without the bytes passing through this route (Vercel caps responses at
+    // ~4.5 MB). Used by current thepack-mcpb get_input_file.
+    if (params2.get("signed") === "1") {
+      const url = await getSignedDownloadUrl(file.key, 600, file.filename);
+      return NextResponse.json({
+        url, filename: file.filename, contentType: file.contentType, size: file.size,
+      });
+    }
+
     const buffer = await readFile(file.key);
 
-    // ?raw=1 → stream the raw bytes (used by the runner's get_input_file, which
-    // saves the file to the agent's workspace and hands Claude a filePath — so
-    // large binaries never get base64-encoded into the model's context).
-    const raw = new URL(request.url).searchParams.get("raw") === "1";
+    // ?raw=1 → stream the raw bytes (older runners' get_input_file; still
+    // works for files under the platform's response size limit).
+    const raw = params2.get("raw") === "1";
     if (raw) {
       return new NextResponse(new Uint8Array(buffer), {
         status: 200,

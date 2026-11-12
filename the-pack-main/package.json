@@ -17,7 +17,8 @@
     "db:reset": "npx prisma migrate reset",
     "postinstall": "prisma generate",
     "storage:provision": "tsx --env-file=.env scripts/provision-storage.mts",
-    "storage:check": "tsx --env-file=.env scripts/storage-roundtrip.ts"
+    "storage:check": "tsx --env-file=.env scripts/storage-roundtrip.ts",
+    "storage:direct-check": "tsx --env-file=.env scripts/direct-upload-check.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

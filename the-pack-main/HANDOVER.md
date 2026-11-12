@@ -2948,3 +2948,63 @@ wider, and every image carries its own footnote saying so.
 screenshotted, so the labels and type are under the same control as the product
 and there is no image toolchain to install. Re-run it against
 `design-audit/pairs` to regenerate.
+
+
+---
+
+## 2026-11-11 — Direct-to-storage file transfers (fixes the Vercel 4.5 MB cap); README rewritten
+
+### Problem
+Vercel caps a serverless function's request **and** response body at ~4.5 MB.
+Every file went through our routes (`POST /api/files/upload`,
+`POST /api/agent-gateway/files/upload`, `GET /api/files/[key]`,
+`GET /api/agent-gateway/files/[id]?raw=1`), so anything above ~4.5 MB failed in
+production despite the 10/20 MB bucket limits. Also a hard prerequisite for any
+future video / batch work.
+
+### Fix (free — Supabase signed URLs, no new service)
+```
+upload:   client ─POST …/upload-url─▶ app   validate type/size/ownership → { signedUrl, contentType, ticket }
+          client ─PUT bytes──────────▶ Supabase Storage (no auth header; URL is the credential, 2 h)
+          client ─POST …/complete────▶ app   stat object, compare size+type with ticket, sniff head → File row
+download: GET /api/files/[key] ─302─▶ signed URL (300 s)   — HTML/SVG/JS still proxied under sandbox CSP
+          GET /api/agent-gateway/files/[id]?signed=1 → { url } (600 s, download filename set)
+```
+- **Ticket** (`src/lib/direct-upload.ts`): HMAC-SHA256(AUTH_SECRET) over
+  `{key, bucket, filename, contentType, size, owner: "user:<id>"|"agent:<id>", executionId, exp}`.
+  `complete` rejects other owners, forged/expired tickets; size/type mismatch
+  deletes the object. `complete` is idempotent (returns the existing row, 200).
+- Agent route normalises content type from the filename at `upload-url` and
+  HTML-sniffs the first bytes at `complete` (same rules as the multipart route).
+- Image dimensions read from the first 128 KB via a Range request — the
+  server never downloads the whole object.
+- Old multipart routes and `?raw=1` / inline JSON kept for back-compat (small files).
+
+### Files
+| | |
+|---|---|
+| New | `src/lib/direct-upload.ts`, `src/app/api/files/upload-url/route.ts`, `src/app/api/files/complete/route.ts`, `src/app/api/agent-gateway/files/upload-url/route.ts`, `src/app/api/agent-gateway/files/complete/route.ts`, `scripts/direct-upload-check.ts` (`npm run storage:direct-check`) |
+| Changed | `src/lib/storage.ts` (`createUploadTarget`, `statFile`, `getSignedDownloadUrl`, `readFileHead`, `bucketOfKey`), `src/app/api/files/[key]/route.ts` (302 for inert types), `src/app/api/agent-gateway/files/[fileId]/route.ts` (`?signed=1`), `src/components/ui/file-upload.tsx` (3-step flow), `thepack-mcpb/src/api-client.ts` + `dist` (`uploadDirect()` for filePath/base64 uploads with fallback to multipart when the route 404s without JSON; `downloadInputFile` uses `?signed=1`, falls back to `?raw=1`) |
+| Docs | `README.md` rewritten for the current product; `guide/thepack.env` gains Supabase vars; `guide/AGENT_API.md` documents the direct flow and fixes the multipart example (it sent `bucket/contextId`, the route reads `executionId`) |
+
+### Verified (real Supabase project, local dev server)
+- Storage level, 6 MB PNG: signed URL → PUT without auth 200 → stat/verify
+  (2000×1500 parsed from header) → wrong owner / bad signature / size mismatch
+  all rejected (mismatched object deleted) → signed download byte-identical.
+- HTTP level: anon `upload-url` 401; publisher 6 MB PDF upload-url → PUT →
+  complete 201, repeat complete 200; 11 MB to a 10 MB bucket 413 before any
+  bytes move; `GET /api/files/[key]` 302 → 6 MB downloaded intact; agent
+  `upload-url` with real key + unknown execution → JSON 404. Test data removed.
+- `tsc --noEmit` clean (app + thepack-mcpb), eslint: no new warnings.
+
+### Not done / notes
+- Not yet exercised on the Vercel deployment itself (needs a deploy). Agent
+  full `complete` path covered at storage level, not with a live sandbox run.
+- Supabase free tier: 50 MB per file max (global). Buckets are 10/20 MB — raise
+  in `MAX_FILE_SIZE` + `provision-storage.mts` (bucket `fileSizeLimit` must be
+  updated on existing buckets, the script leaves existing ones alone) when
+  video lands.
+- Script-capable deliverables (HTML/SVG/JS) are still proxied, so one above
+  ~4.5 MB would still fail on Vercel — acceptable for now.
+
+### State: committed and pushed to `feature/integrate-revision-system`.

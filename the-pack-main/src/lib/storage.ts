@@ -152,6 +152,72 @@ export async function deleteFile(key: string): Promise<void> {
   }
 }
 
+// ── Direct-to-storage transfers ──────────────────────────────────────────────
+// Vercel caps a serverless request AND response body at ~4.5 MB, far below the
+// bucket limits. So large bytes must not pass through our API routes: uploads
+// go browser/agent → Supabase via a one-time signed upload URL, and downloads
+// are redirected to a short-lived signed URL. Our routes only issue and verify.
+
+export interface UploadTarget {
+  key: string;
+  /** PUT the raw bytes here with the same Content-Type. Valid for 2 hours. */
+  signedUrl: string;
+}
+
+/** Validates the declared file and returns a one-time URL to PUT it to. */
+export async function createUploadTarget(
+  bucket: StorageBucket, contextId: string, filename: string,
+  contentType: string, size: number
+): Promise<UploadTarget> {
+  validateFile(bucket, contentType, size);
+  const key = generateKey(bucket, contextId, filename);
+  const { objectPath } = splitKey(key);
+  const { data, error } = await getSupabaseAdmin()
+    .storage.from(bucket).createSignedUploadUrl(objectPath);
+  if (error || !data) {
+    throw new StorageError(
+      `Could not create upload URL: ${error?.message ?? "no data"}`, "UPLOAD_FAILED"
+    );
+  }
+  return { key, signedUrl: data.signedUrl };
+}
+
+/** Size + content type of an object as stored, or NOT_FOUND. */
+export async function statFile(key: string): Promise<{ size: number; contentType: string }> {
+  const { bucket, objectPath } = splitKey(key);
+  const { data, error } = await getSupabaseAdmin().storage.from(bucket).info(objectPath);
+  if (error || !data) throw new StorageError(`File not found: ${key}`, "NOT_FOUND");
+  return {
+    size: Number(data.size ?? 0),
+    contentType: String(data.contentType ?? "").split(";")[0].trim(),
+  };
+}
+
+/** Short-lived URL that reads the object directly from storage. */
+export async function getSignedDownloadUrl(
+  key: string, expiresInSeconds = 300, downloadAs?: string
+): Promise<string> {
+  const { bucket, objectPath } = splitKey(key);
+  const { data, error } = await getSupabaseAdmin()
+    .storage.from(bucket)
+    .createSignedUrl(objectPath, expiresInSeconds, downloadAs ? { download: downloadAs } : undefined);
+  if (error || !data) throw new StorageError(`File not found: ${key}`, "NOT_FOUND");
+  return data.signedUrl;
+}
+
+/** First `bytes` of an object (for type sniffing / image dimensions) without downloading all of it. */
+export async function readFileHead(key: string, bytes = 128 * 1024): Promise<Buffer> {
+  const url = await getSignedDownloadUrl(key, 60);
+  const res = await fetch(url, { headers: { Range: `bytes=0-${bytes - 1}` } });
+  if (!res.ok) throw new StorageError(`File not found: ${key}`, "NOT_FOUND");
+  return Buffer.from(await res.arrayBuffer()).subarray(0, bytes);
+}
+
+/** Bucket named by a key's first segment (throws on malformed/unknown). */
+export function bucketOfKey(key: string): StorageBucket {
+  return splitKey(key).bucket;
+}
+
 export function getFileUrl(key: string): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   return `${appUrl}/api/files/${encodeURIComponent(key)}`;

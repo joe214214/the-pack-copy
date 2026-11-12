@@ -23,6 +23,53 @@ async function request(endpoint, options = {}) {
     }
     return response.json();
 }
+/**
+ * Upload a deliverable straight to storage via a signed URL (platform issues
+ * the URL + verifies afterwards; bytes skip the platform, so no ~4.5 MB cap
+ * from serverless hosting). Returns null when the platform predates this
+ * endpoint (404), so the caller falls back to the multipart route.
+ */
+async function uploadDirect(executionId, filename, bytes, contentType) {
+    const config = getConfig();
+    const base = `${config.serverUrl.replace(/\/$/, "")}/api/agent-gateway/files`;
+    const auth = { Authorization: `Bearer ${config.agentKey}`, "Content-Type": "application/json" };
+    const prepRes = await fetch(`${base}/upload-url`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ executionId, filename, contentType, size: bytes.length }),
+    });
+    if (prepRes.status === 404 || prepRes.status === 405) {
+        const body = await prepRes.json().catch(() => null);
+        // 404 with a JSON error is a real "execution not found", not a missing route.
+        if (!body?.error)
+            return null;
+        throw new Error(`Upload failed [${prepRes.status}]: ${body.error}`);
+    }
+    if (!prepRes.ok) {
+        const err = await prepRes.json().catch(() => ({ error: prepRes.statusText }));
+        throw new Error(`Upload failed [${prepRes.status}]: ${err.error || prepRes.statusText}`);
+    }
+    const prep = await prepRes.json();
+    const put = await fetch(prep.signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": prep.contentType, "x-upsert": "false" },
+        body: new Uint8Array(bytes),
+    });
+    if (!put.ok) {
+        const detail = await put.text().catch(() => "");
+        throw new Error(`Upload to storage failed [${put.status}]: ${detail.slice(0, 200)}`);
+    }
+    const doneRes = await fetch(`${base}/complete`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ ticket: prep.ticket }),
+    });
+    if (!doneRes.ok) {
+        const err = await doneRes.json().catch(() => ({ error: doneRes.statusText }));
+        throw new Error(`Upload failed [${doneRes.status}]: ${err.error || doneRes.statusText}`);
+    }
+    return doneRes.json();
+}
 export const apiClient = {
     async whoami() {
         return request(`/api/agent-gateway/whoami`);
@@ -38,16 +85,32 @@ export const apiClient = {
     // Claude opens the file by path (mirrors the filePath upload on the way out).
     async downloadInputFile(fileId, destDir) {
         const config = getConfig();
-        const url = `${config.serverUrl.replace(/\/$/, "")}/api/agent-gateway/files/${fileId}?raw=1`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${config.agentKey}` } });
+        const base = `${config.serverUrl.replace(/\/$/, "")}/api/agent-gateway/files/${fileId}`;
+        const auth = { Authorization: `Bearer ${config.agentKey}` };
+        // Preferred: ask for a short-lived direct storage URL and download from
+        // there WITHOUT our key — no size cap from the platform's hosting. Older
+        // servers ignore ?signed=1 and answer with inline JSON (no `url`), in
+        // which case we fall back to ?raw=1.
+        let res = null;
+        let signedMeta = {};
+        const probe = await fetch(`${base}?signed=1`, { headers: auth });
+        if (probe.ok) {
+            const meta = await probe.json().catch(() => null);
+            if (meta && typeof meta.url === "string") {
+                signedMeta = meta;
+                res = await fetch(meta.url);
+            }
+        }
+        if (!res)
+            res = await fetch(`${base}?raw=1`, { headers: auth });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ error: res.statusText }));
-            throw new Error(`Download failed [${res.status}]: ${err.error || res.statusText}`);
+            throw new Error(`Download failed [${res.status}]: ${err.error || err.message || res.statusText}`);
         }
-        const contentType = (res.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
+        const contentType = (signedMeta.contentType || res.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
         const cd = res.headers.get("content-disposition") || "";
         const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^"]+)"?/i);
-        const rawName = m ? decodeURIComponent(m[1]) : `input-${fileId}`;
+        const rawName = signedMeta.filename || (m ? decodeURIComponent(m[1]) : `input-${fileId}`);
         const safeName = rawName.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "") || `input-${fileId}`;
         const buf = Buffer.from(await res.arrayBuffer());
         const { writeFileSync, mkdirSync } = await import("node:fs");
@@ -114,6 +177,9 @@ export const apiClient = {
                 throw new Error(`Cannot read filePath "${filePath}": ${e.message}`);
             }
             const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
+            const direct = await uploadDirect(executionId, filename, bytes, contentType);
+            if (direct)
+                return direct;
             const formData = new FormData();
             formData.append("file", blob, filename);
             formData.append("executionId", executionId);
@@ -153,6 +219,9 @@ export const apiClient = {
             bytes[i] = binaryString.charCodeAt(i);
         }
         const blob = new Blob([bytes], { type: contentType });
+        const direct = await uploadDirect(executionId, filename, Buffer.from(bytes), contentType);
+        if (direct)
+            return direct;
         const formData = new FormData();
         formData.append("file", blob, filename);
         formData.append("executionId", executionId);

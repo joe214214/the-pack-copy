@@ -1,11 +1,12 @@
 /**
  * GET /api/files/[key] — Serve a stored file
  *
- * Reads the file from storage and returns it with the correct Content-Type.
+ * Script-capable types (HTML/SVG/JS) are read and returned under a sandbox
+ * CSP; everything else is a 302 to a short-lived signed storage URL.
  * The [key] parameter is the full storage key (URL-encoded).
  */
 import { NextRequest, NextResponse } from "next/server";
-import { readFile, StorageError } from "@/lib/storage";
+import { readFile, getSignedDownloadUrl, StorageError } from "@/lib/storage";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -31,6 +32,20 @@ export async function GET(
 
     if (!fileRecord) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    // Inert types: redirect to a short-lived signed storage URL instead of
+    // proxying. A proxied response is capped at ~4.5 MB on Vercel, so large
+    // images/PDFs (and future video) would fail; this also keeps the bytes
+    // off our function bandwidth. Script-capable types are still proxied
+    // below so they get the sandbox CSP.
+    if (!ACTIVE_TYPES.has(fileRecord.contentType)) {
+      const signed = await getSignedDownloadUrl(decodedKey, 300);
+      return NextResponse.redirect(signed, {
+        status: 302,
+        // A little under the URL's lifetime so a cached redirect never points at an expired URL.
+        headers: { "Cache-Control": "private, max-age=240" },
+      });
     }
 
     // Read file content from storage

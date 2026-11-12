@@ -27,6 +27,51 @@ interface FileUploadProps {
   description?: string;
 }
 
+async function jsonOrThrow(res: Response, fallback: string) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `${fallback}: ${res.status}`);
+  return data;
+}
+
+/**
+ * Uploads straight to storage (signed URL), so the bytes never pass through
+ * our API — Vercel caps request bodies at ~4.5 MB. See src/lib/direct-upload.ts.
+ */
+async function uploadDirect(
+  file: File, bucket: FileUploadProps["bucket"], contextId: string
+): Promise<UploadedFile> {
+  const prep = await jsonOrThrow(
+    await fetch("/api/files/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bucket, contextId, filename: file.name, contentType: file.type || undefined, size: file.size,
+      }),
+    }),
+    "Upload failed"
+  );
+
+  const put = await fetch(prep.signedUrl, {
+    method: "PUT",
+    headers: { "Content-Type": prep.contentType, "x-upsert": "false" },
+    body: file,
+  });
+  if (!put.ok) {
+    const detail = await put.text().catch(() => "");
+    throw new Error(`Upload to storage failed: ${put.status} ${detail.slice(0, 200)}`);
+  }
+
+  const done = await jsonOrThrow(
+    await fetch("/api/files/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket: prep.ticket }),
+    }),
+    "Upload failed"
+  );
+  return done.file;
+}
+
 export function FileUpload({
   bucket,
   contextId,
@@ -54,23 +99,7 @@ export function FileUpload({
 
     for (const file of toUpload) {
       try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("bucket", bucket);
-        formData.append("contextId", contextId);
-
-        const res = await fetch("/api/files/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: "Upload failed" }));
-          throw new Error(data.error || `Upload failed: ${res.status}`);
-        }
-
-        const data = await res.json();
-        newFiles.push(data.file);
+        newFiles.push(await uploadDirect(file, bucket, contextId));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");
         break;
