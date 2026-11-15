@@ -48,7 +48,19 @@ services:
       CODEX_MODEL: ${CODEX_MODEL:-}
       # Antigravity-only overrides (empty => the Antigravity account default).
       AGY_MODEL: ${AGY_MODEL:-}
-      AGY_ADC_AUTH: ${AGY_ADC_AUTH:-true}
+      # Read by `agy` itself, not by our code. Truthy means "authenticate ONLY
+      # through Google Application Default Credentials", and agy then refuses
+      # every other sign-in method: with no ADC file present it reports "No
+      # authentication methods available / ADC authentication failed" and there
+      # is no way to log in at all, not even interactively.
+      #
+      # It used to default to `true`, which made the Antigravity brain
+      # unusable for anyone who has not run `gcloud auth application-default
+      # login` — including during the one interactive login needed to get
+      # credentials into the box in the first place. Defaulting to empty lets
+      # agy offer its normal sign-in methods; set it to true in .env only if
+      # you really are authenticating by ADC.
+      AGY_ADC_AUTH: ${AGY_ADC_AUTH:-}
 
     # NO API KEY NEEDED. `start.sh`/`start.bat` copies your Claude login token
     # (.credentials.json) and your skills into ./claude-home, which is mounted

@@ -3059,3 +3059,446 @@ Both upstream constraints were resolved by November 2026:
    - Added `antigravity` to `matrix.brain` and passed `INSTALL_ANTIGRAVITY=0|1` per brain so each published image stays single-brain.
 4. **Documentation**:
    - Updated `guide/IMAGE_GENERATION_RESEARCH.md` (§7 resolution), `README.md`, `thepack-mcpb/sandbox/README.md`, `guide/FEATURES.md`, and `HANDOVER.md`.
+
+---
+
+## 2026-11-14 — Verification pass after merging the direct-upload / video / Antigravity work
+
+No code changed here. The three commits `4e34381`, `77890ed`, `bd659bb` were
+fast-forwarded onto the local branch and then exercised, because they touch the
+storage layer and the file-serving route, which are the two places a regression
+would be silent.
+
+### What was checked, and what it showed
+
+| Check | Result |
+|---|---|
+| `prisma migrate diff` (live DB vs schema) | **No difference detected** — `VIDEO_EDITING` was already pushed, so no `db push` was needed and no write hit production |
+| `tsc --noEmit` | clean |
+| `next build` | clean; all four new routes registered (`/api/files/{upload-url,complete}`, `/api/agent-gateway/files/{upload-url,complete}`) |
+| `npm run lint` | 46 errors, 43 of them pre-existing (`git blame` puts them in `faaa6c8`); the 3 new ones are `no-explicit-any` in `scripts/direct-upload-check.ts`, a dev script |
+| `npm run storage:check` | upload / read / delete / verify-deleted all pass |
+| `npm run storage:direct-check` | 6 MB PUT straight to Supabase returns 200; wrong-owner, bad-signature and size-mismatch tickets all rejected; signed download bytes identical |
+| `scripts/files-http-check.ts` | 200, correct content type, bytes identical |
+| `thepack-mcpb` `tsc` | clean, and the committed `dist/` matches a fresh build byte-for-byte (only CRLF differs) |
+| Storage leftover scan | no probe objects left in any bucket |
+
+### Security headers still hold
+`/api/files/[key]` was probed with a stored `<script>` payload under three
+content types. `text/html` and `image/svg+xml` are still served from this origin
+under `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups`
+plus `X-Content-Type-Options: nosniff`. Inert types (`text/markdown` and the
+rest) now 307 to a Supabase signed URL instead, so download bytes also skip
+Vercel.
+
+That split is safe rather than accidental, and it is worth writing down why,
+because it is easy to break later: the only script-capable types in
+`ALLOWED_TYPES` are `text/html`, `image/svg+xml` and `text/javascript`, which is
+exactly the `ACTIVE_TYPES` set that gets the sandbox. The allowlist is matched
+exactly, so `text/html; charset=utf-8` is rejected at upload rather than
+slipping past the set and being redirected to storage. **Adding a
+script-capable type to `ALLOWED_TYPES` without adding it to `ACTIVE_TYPES`
+would hand it an un-sandboxed path.** `verifyStoredObject()` also re-reads size
+and content type after the PUT and deletes the object on mismatch, so a declared
+`image/png` that is really HTML does not survive.
+
+### End-to-end, logged in as a real session
+`upload-url` → direct `PUT` of 6 MB → `complete` → `GET /api/files/[key]`:
+HTTP 200 / 200 / 201 / 302, image dimensions parsed correctly (2000x1500),
+downloaded bytes identical, row and object cleaned up afterwards. All four new
+endpoints return 401 unauthenticated, and the agent-gateway pair returns 403 on
+a bad `tpk_` key.
+
+### Not covered
+The agent-gateway upload pair was verified at the auth layer and through the
+shared `direct-upload.ts` core, not with a live agent API key — that would have
+meant minting a key and an `Execution` row in the production database.
+
+---
+
+## 2026-11-15 — Sandbox brains tested on bare metal: Codex `image_gen` does NOT reproduce; Antigravity does
+
+The verification above covered only the web app. This entry covers the agent
+brains, and it contradicts part of the 2026-11-12 entry.
+
+Docker Desktop's daemon was not running, so the **container** was not exercised.
+What follows was run against the CLIs directly, which is where the image claim
+actually lives.
+
+### Codex: `image_gen` is not exposed at `codex-cli 0.157.0` with a ChatGPT account
+
+The 2026-11-12 entry states that `codex exec --enable image_generation` exposes
+`image_gen` (backed by `gpt-image-2`) on a ChatGPT subscription, verified by
+disassembly against `0.155.0`. **That no longer reproduces at `0.157.0`.**
+
+- `codex features list` confirms the flag is real and takes effect:
+  `image_generation  stable  true`, `view_image  stable  true`. So the two
+  `--enable` flags in `codexCommand()` are redundant but harmless — the feature
+  is on by default.
+- Despite that, asking the model to enumerate its callable tools — real
+  `CODEX_HOME`, runner's exact flags, `-C <workdir>`, `--approve-for-me` —
+  returns a list with **no `image_gen` and no `view_image`**:
+  `functions.exec`, `functions.wait`, `functions.request_user_input_async`,
+  `functions.clock__curr_time`, `functions.web__run`, `clock.sleep`,
+  `collaboration.*`, `mcp__cua_repl.*`.
+- Asked directly to generate an image under instructions forbidding a drawn
+  substitute, it answered `NO IMAGE TOOL AVAILABLE`.
+
+Consequence: on this version the Codex brain falls through to the Pillow branch
+of `WORK_PROMPT`, i.e. it *draws* an approximation. For a photorealistic
+`IMAGE_GENERATION` order that is a visibly wrong deliverable. Either pin the
+Codex image path to a version where it is exposed, or route image work to
+Antigravity and stop advertising Codex for it.
+
+### Separate: a host model pin breaks Codex on bare metal, but NOT in the box
+
+A host `~/.codex/config.toml` containing `model = "gpt-5.5"` makes `codex exec`
+exit 1 with `The 'gpt-5.5' model is not supported when using Codex with a
+ChatGPT account` — the same rejection `codexCommand()`'s comment documents for
+explicit `-m`, except here it arrives from config, which the runner never sets
+and cannot see. With a clean `CODEX_HOME` the CLI picks `gpt-6-luna` and runs.
+
+**Correction to the first draft of this entry:** this does *not* reach the
+container. `sandbox/start.sh` copies only `auth.json` out of the host Codex
+home, deliberately — its comment says the host `config.toml` is skipped because
+its MCP servers point at paths that do not exist in the box. Codex then writes
+its own `config.toml` inside `./codex-home`, and that file carries no model
+pin. So the container is unaffected; only a bare-metal run inherits the pin.
+
+### Antigravity: works, and the output is a genuine raster image
+
+`agy 1.5.8`, headless `-p`, no permission bypass needed to read its own
+capabilities. Subagent types are `self`, `research`, **`image-generator`**.
+
+Invoking it for a photorealistic prompt produced a real photograph-like PNG,
+not vector art. Measured on the output:
+
+| metric | value | what it rules out |
+|---|---|---|
+| dimensions | 1264x848 | — |
+| file size | 2424 KB (2.32 bytes/px) | drawn flat art compresses far smaller |
+| unique colors | 93,017 (8.7% of pixels) | PIL/cairosvg output has tens to hundreds |
+| mean local gradient | 9.68 | flat vector regions sit near 0 |
+
+Visually confirmed as well: correct subject, natural depth of field, sunset
+backlight. So the "built-in AI image generation" claim in `FEATURES.md` is
+**true for the Antigravity brain and currently false for the Codex brain**.
+
+Two small notes: `image-generator` returns a JPEG which the agent converts to
+PNG, and it ignored the requested output filename (`output.png`) in favour of
+its own. Neither matters to the pipeline, which uploads by absolute path.
+
+### Also found: every historical image row is dangling
+All 8 `File` rows with an `image/*` content type point at storage keys that no
+longer exist — they predate the Supabase migration, when files were on local
+disk. Nothing reads them today, but a gallery or a re-delivery feature would
+hit 404s. They should be pruned or backfilled.
+
+---
+
+## 2026-11-15 (later) — Full sandbox container run: both new brains fail, for different reasons
+
+The container was rebuilt from the current Dockerfile (2.39 GB, down from the
+6.75 GB image of seven weeks ago) and run against the live deployment, with a
+real `IMAGE_GENERATION` order placed and dispatched. This is the end-to-end
+test the previous entry could not do, because Docker was not running.
+
+### The plumbing works
+
+With `AGENT_CLI=codex` the whole chain ran clean on the first try:
+`whoami` → `get_assigned_jobs` → `set_task_plan` → `report_progress` x3 →
+`submit_image_result`, order driven to `REVIEW`, `codex finished (exit 0)`.
+Nothing in the MCP layer, the dispatch loop or the gateway needed touching.
+
+### Codex cannot do image work — now confirmed inside the box
+
+The agent's own closing words: *"No image generation tool was available in this
+session, so I did not create substitute artwork."* This reproduces the
+bare-metal finding of the previous entry in the real container, so it is not a
+host artifact.
+
+It only declined to fake the image because the task brief explicitly told it to
+say so rather than substitute a drawing. A normal brief would have got Pillow
+artwork delivered as if it were the real thing — the `WORK_PROMPT` fallback is
+written to do exactly that. The delivered `outputFiles` entry was a
+`data:text/markdown;base64` note, not an uploaded file.
+
+### Antigravity never starts: one bad flag
+
+`AGENT_CLI=antigravity` fails every single dispatch with
+
+```
+flags provided but not defined: -mcp-config
+```
+
+`antigravityCommand()` (`thepack-mcpb/src/runner.ts:430`) passes
+`"--mcp-config", cfgPath`. **`agy` 1.5.8 has no such flag.** Verified directly
+against the host CLI:
+
+| flag | exists? |
+|---|---|
+| `--mcp-config` | **no** — `flags provided but not defined: -mcp-config` |
+| `--dangerously-skip-permissions` | yes, accepted |
+| `--mode auto` / `--model` / `--output-format` | yes |
+
+The registration `ensureAntigravityMcp()` already does is correct and
+sufficient: `agy mcp add` writes to `~/.gemini/config/mcp_config.json`, which
+is the very file the runner writes, confirmed by adding a server with
+`agy mcp add` and reading the file back. So `agy` picks the config up on its
+own and the flag is not merely wrong, it is unnecessary.
+
+**Fix: delete `"--mcp-config", cfgPath` from the args array at
+`src/runner.ts:430`** (and rebuild `dist/`). Nothing else appears to be wrong
+with that brain — the same CLI, driven by hand with the same prompt shape,
+produced a genuine photorealistic PNG (previous entry).
+
+### A second, independent problem: the failure retries forever
+
+A dispatch that fails for a permanent reason is retried on every poll. The
+Antigravity run burned **19 identical failures in about three minutes** against
+the live server, and would have continued indefinitely; the job is never
+failed, abandoned or backed off. Worth a retry cap or a backoff on
+non-transient exits, independent of the flag bug.
+
+### An ordering trap worth recording
+`POST /api/orders` freezes escrow and sets the order to `CREATED`, and the task
+to `MATCHED`, **but creates no `Execution`**. The runner polls for orders that
+are `EXECUTING` with a `PENDING`/`RUNNING` execution, so an order created that
+way is never dispatched and simply sits there. The paths that do start work are
+`POST /api/tasks/[id]/assign` (agent owner) and
+`POST /api/agent-gateway/tasks/claim` (agent, task must still be `OPEN`).
+Whether `/api/orders` is meant to be a dead end is worth deciding.
+
+### Cleanup state
+Both test tasks, their orders, executions, reviews and files were deleted, and
+the sandbox `.env` was restored to `AGENT_CLI=codex`. **One loose end:** 25 of
+`jordan@example.com`'s balance is still in `frozenBalance` with no order behind
+it, because the orders were deleted before both escrows were released
+(balance 5375 + frozen 25 = the original 5400). Returning it needs a direct
+balance write, which was declined as a money mutation and is left for a human
+to do deliberately.
+
+---
+
+## 2026-11-15 (later still) — `--mcp-config` removed; Antigravity now blocked on auth instead
+
+### The fix, and that it worked
+
+`antigravityCommand()` in `thepack-mcpb/src/runner.ts` no longer passes
+`"--mcp-config", cfgPath`; the comment above it now records why (`agy` rejects
+the flag, and registration is persistent via
+`~/.gemini/config/mcp_config.json`, which is the same file `agy mcp add`
+maintains). `dist/` rebuilt, image rebuilt, container restarted.
+
+Note the old line was wrong twice over: `cfgPath` is `<cfgDir>/mcp.json`, the
+*Claude* config file, not the Gemini one `ensureAntigravityMcp()` writes.
+`cfgPath` is still used by the Claude branch, so nothing became unused.
+
+Result on a real dispatched order: **zero occurrences of
+`flags provided but not defined: -mcp-config`**, down from 19. The brain now
+launches.
+
+### The next blocker: `agy` auth cannot be copied off a Windows host
+
+Every run now fails with:
+
+```
+Error: authentication required. Run 'agy' to log in, then retry.
+```
+
+Root cause, confirmed: the live Antigravity credential is stored in **Windows
+Credential Manager**, not on disk. `cmdkey /list` shows
+`LegacyGeneric:target=gemini:antigravity`, type Generic, **Local machine
+persistence** — DPAPI, bound to this machine and user, so it cannot be
+transplanted into a Linux container by copying files.
+
+What `start.sh` copies is `~/.gemini/oauth_creds.json`, and that file is a
+**stale leftover**, not the credential in use: its `expiry_date` is
+2026-09-17, two months old, and running `agy` successfully on the host does
+not rewrite it. The container therefore receives an expired token whose
+refresh it cannot complete.
+
+Ruled out while diagnosing:
+- not the network — the container reaches `oauth2.googleapis.com` fine;
+- not a missing file permission — the mount is visible and world-readable;
+- not `AGY_ADC_AUTH`, which `docker-compose.yml` declares but **nothing reads**
+  (neither the entrypoint nor `runner.ts`) — it is a dead variable;
+- not an API key: `GEMINI_API_KEY` set in the container does not satisfy `agy`,
+  which wants its own OAuth session.
+
+Also noticed: the container builds `agy` 1.5.9 while the host has 1.5.8, since
+the Dockerfile installs latest at build time and nothing pins it.
+
+### What would actually unblock it
+A one-time interactive `agy` login **inside** the container, so the credential
+lands in the mounted `./agy-home` rather than in the host's Windows credential
+store. That needs a human at a browser OAuth prompt, so it was not attempted.
+Until then the Antigravity brain cannot run headless from a Windows host, and
+`start.sh`'s Antigravity credential sync is misleading — it copies a file that
+does nothing.
+
+### The retry storm is still there, and it is worse than it looked
+The auth failure repeated **22 times in roughly four minutes** against the live
+deployment before the container was stopped by hand. Both failure modes seen
+today — a bad flag and a bad credential — are permanent, and neither is
+detected: the job is re-dispatched every poll forever. A cap or backoff on
+non-transient exits is the single highest-value fix left in the runner.
+
+### Cleanup
+The test task, order, execution, review and files were removed and the escrow
+released. `.env` is back to `AGENT_CLI=codex`; set it to `antigravity` again
+after a successful in-container login. The 25 still frozen on
+`jordan@example.com` from the earlier round is unchanged and still needs a
+deliberate human balance write.
+
+---
+
+## 2026-11-15 (later still) — Failed runs now back off instead of hammering
+
+### The problem
+A dispatched job stays dispatched until the agent reports it done over MCP, so
+a brain that cannot run at all was re-dispatched on **every** poll, forever.
+Two real cases hit this today, both exiting immediately: a CLI rejecting one of
+our flags (exit 2) and a CLI with no usable credentials (exit 1). Each produced
+about 20 identical failures in a few minutes against the live deployment, and
+would not have stopped on its own.
+
+### The change (`thepack-mcpb/src/runner.ts`)
+- `runAgent()` now resolves with the CLI's **exit code** instead of `void`;
+  `null` means it never exited normally — failed to launch, or killed by the
+  watchdog. `finish()` carries the code, and all three call sites (close,
+  error, watchdog) were updated.
+- New `noteRunResult(code)` plus `consecutiveFailures` / `cooldownUntil`.
+  Exit 0 clears both (and logs `recovered after N failed attempt(s)` if it had
+  been failing). Anything else doubles the wait: 30s, 1 min, 2 min, 4 min …
+  capped at 15 min.
+- `tick()` returns early while `Date.now() < cooldownUntil`.
+- After 3 consecutive failures the message changes to say plainly that it does
+  not look transient and names the likely causes. **Only the wording changes —
+  it keeps retrying at the 15-minute ceiling**, deliberately, so a genuinely
+  transient outage still recovers by itself without anyone restarting anything.
+
+Heartbeats are intentionally left outside the cooldown: an agent waiting to
+retry is still online, and the website should keep showing it that way.
+
+### Verified against both paths, in the container, on the live deployment
+Failure path, using the real Antigravity auth failure:
+
+| time | attempt | next wait |
+|---|---|---|
+| 6:57:03 | 1 | 30s |
+| 6:57:43 | 2 | 1 min |
+| 6:58:53 | 3 | *"not looking transient"* + 2 min |
+| 7:01:03 | 4 | 4 min |
+
+**4 attempts in 5 minutes, against ~30 before.** The agent's `lastHeartbeat`
+stayed at 1s old throughout, so it remained online in the database while in
+cooldown.
+
+Success path, same job handed to the working Codex brain: one dispatch, MCP
+chain ran through `submit_result`, `codex finished (exit 0)`, **no cooldown
+logged and no re-dispatch**. The happy path is unchanged.
+
+### Still open
+This only covers a run that *fails*. A run that exits 0 without completing the
+job is still re-dispatched immediately with no backoff — which is usually
+right, since the agent may legitimately need another pass, but it is the
+remaining way to spin.
+
+### Escrow left frozen — needs a human
+`jordan@example.com` now has **50 frozen** (`balance 5350 + frozen 50`, still
+5400 in total, nothing lost). Two test orders' escrow was never released: the
+first because the orders were deleted before cancelling, the second because the
+order had already reached `REVIEW`, and `PATCH /api/orders/[id]` with
+`action: "cancel"` only accepts `CREATED` or `EXECUTING` (it returned 409).
+Returning it is a direct balance write, which was declined as a money mutation
+and is left to be done deliberately.
+
+---
+
+## 2026-11-15 (final) — Antigravity brain works end to end; a real image was delivered
+
+### Correction: `AGY_ADC_AUTH` is not a dead variable
+An earlier entry today called it dead because nothing in the Dockerfile or
+`runner.ts` reads it. That was wrong — **`agy` itself reads it**. Truthy means
+"authenticate only through Google Application Default Credentials", and agy
+then refuses every other sign-in method. `docker-compose.yml` defaulted it to
+`true`, so with no ADC file present the CLI reported
+
+```
+No authentication methods available.
+ADC authentication failed. ...
+3. Or unset AGY_ADC_AUTH env var to use other sign in methods.
+```
+
+and there was no way to log in at all, not even interactively. Measured:
+unset, empty, `false` and `0` all restore the normal sign-in path. The default
+is now `${AGY_ADC_AUTH:-}`, with a comment saying why. Without this the brain
+would have re-locked itself on every `docker compose up`, even after a
+successful login.
+
+### The run
+Owner logged in interactively inside the container, so the credential now lives
+in the mounted `./agy-home` instead of the host's Windows credential store.
+With `AGENT_CLI=antigravity`, one real `IMAGE_GENERATION` order on the live
+deployment ran start to finish in about 83 seconds:
+
+`get_assigned_jobs` → `get_task_detail` → `set_task_plan` → `image-generator`
+subagent → JPEG converted to PNG → `upload_file` → `submit_image_result` →
+`antigravity finished (exit 0)`.
+
+The deliverable is a genuinely uploaded object, not the `data:` base64 blob
+Codex produced: `task-outputs/<executionId>/…_golden_retriever_porch_sunset.png`,
+1024x1024, 1,550,623 bytes. Measured on the delivered bytes:
+
+| metric | value |
+|---|---|
+| unique colors | 148,347 (14.1% of pixels) |
+| file size | 1.48 bytes/px |
+| mean local gradient | 11.10 |
+
+Photographic, not drawn. **The image claim in `FEATURES.md` is now true for the
+Antigravity brain, and still false for Codex.**
+
+### All three fixes confirmed in the container
+- `--mcp-config` removed → the brain launches.
+- `AGY_ADC_AUTH` default → login possible, and the runner no longer re-locks.
+- Failure backoff → 4 attempts in 5 min instead of ~30, with no effect on the
+  success path.
+
+### Settlement does not actually happen
+`PATCH /api/orders/[id]` with `action: "accept"` moves the order `REVIEW` →
+`ACCEPTED` and **moves no money**. Measured across the call: buyer
+`balance 5325 / frozen 75` before and after, agent owner `4017.2` before and
+after. The settlement path is the BullMQ queue in `src/lib/queue.ts`, which
+nothing runs — so escrow is frozen at order creation and never released to
+anyone. An accepted order leaves the buyer's money stranded and the worker
+unpaid. This is a product-level gap, not a test artifact.
+
+`jordan@example.com` currently holds **75 frozen** from three test orders
+(`balance 5325 + frozen 75` = the original 5400; nothing lost). Releasing it
+needs a deliberate balance write.
+
+### Rejected: forcing image tasks onto Antigravity
+Considered and **dropped** — it contradicts the product model, where each
+worker brings their own agent on their own account. A worker without an
+Antigravity subscription would simply be excluded.
+
+The real defect is elsewhere: `supportedTaskTypes` is **hand-picked at
+registration** (`api/agents/route.ts:94`) and the runner never reports what its
+brain can actually do. So a Codex-brained agent can advertise
+`IMAGE_GENERATION`, win the order, find no image tool, and fall through to the
+Pillow branch of `WORK_PROMPT` — delivering drawn artwork as if it were the
+real thing. Two brain-agnostic directions, neither of which constrains the
+owner's choice of agent:
+
+1. Have the runner probe its brain's image capability at startup and report it
+   with the heartbeat, so the marketplace shows what each agent can really do.
+2. **Remove the draw-it-anyway fallback for `IMAGE_GENERATION`** so a brain
+   without a real generator fails honestly instead of producing a fake
+   deliverable. Pillow stays for what it suits — crops, watermarks,
+   deterministic batch pixel work.
+
+(2) is the smaller and more urgent of the two: it closes the path where a
+paying customer receives counterfeit work. Both are new behaviour, not bug
+fixes, and are **not** implemented.

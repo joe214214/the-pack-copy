@@ -255,6 +255,57 @@ async function api(endpoint, init) {
     return res.json();
 }
 let busy = false;
+// ---------------------------------------------------------------------------
+// Backoff after failed runs.
+//
+// A dispatched job stays dispatched until the agent reports it done over MCP.
+// So if the brain cannot run at all, every poll re-dispatches the same job and
+// the runner hammers the server forever at the poll interval. Two real cases
+// hit this: a CLI that rejects one of our flags (exit 2 immediately) and a CLI
+// whose credentials are missing (exit 1 immediately). Both produced ~20
+// identical failures in a few minutes against the live deployment.
+//
+// Neither is recoverable by trying again sooner, but a failure CAN be
+// transient (a dropped network, a brief API outage), so we do not stop for
+// good. Instead each consecutive failure doubles the wait, up to a ceiling —
+// the hammering stops within a minute or two, while a system that fixes itself
+// still gets picked up automatically.
+//
+// Heartbeats are deliberately NOT part of this: the website should keep seeing
+// the agent as online while it is in a cooldown, because it is.
+const BACKOFF_BASE_MS = 30_000;
+const BACKOFF_MAX_MS = 15 * 60_000;
+// After this many consecutive failures, say plainly that it looks permanent.
+// Only the wording changes; the loop keeps retrying at BACKOFF_MAX_MS.
+const LOOKS_PERMANENT_AFTER = 3;
+let consecutiveFailures = 0;
+let cooldownUntil = 0;
+function describeWait(ms) {
+    return ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)}s`;
+}
+/** Record how a run ended and set (or clear) the cooldown that follows. */
+function noteRunResult(code) {
+    if (code === 0) {
+        if (consecutiveFailures > 0) {
+            log(`recovered after ${consecutiveFailures} failed attempt(s)`);
+        }
+        consecutiveFailures = 0;
+        cooldownUntil = 0;
+        return;
+    }
+    consecutiveFailures++;
+    const wait = Math.min(BACKOFF_BASE_MS * 2 ** (consecutiveFailures - 1), BACKOFF_MAX_MS);
+    cooldownUntil = Date.now() + wait;
+    const how = code === null ? "did not exit normally" : `exited ${code}`;
+    if (consecutiveFailures === LOOKS_PERMANENT_AFTER) {
+        log(`${AGENT_CLI} ${how} ${consecutiveFailures} times in a row — this is not looking transient. ` +
+            `Check the error above: a rejected flag or a missing login will repeat forever. ` +
+            `Still retrying, but no more often than every ${describeWait(BACKOFF_MAX_MS)}.`);
+    }
+    else {
+        log(`${AGENT_CLI} ${how} — waiting ${describeWait(wait)} before trying this job again (failure ${consecutiveFailures})`);
+    }
+}
 // Which claude.ai connectors the worker is allowed to use (MCP server names).
 // Seeded from ALLOWED_CONNECTORS (local override), otherwise refreshed from the
 // owner's ticked list via whoami. See runClaude() for how this gates tools.
@@ -400,10 +451,17 @@ function codexCommand(workDir) {
     return { cmd: CODEX_BIN, args };
 }
 // How to launch the Google Antigravity CLI (`agy`) for one job. Like Claude it
-// supports headless `-p` (reading the full prompt from stdin) and `--mcp-config`,
-// and has a built-in `image-generator` subagent on the owner's subscription.
+// supports headless `-p`, reading the full prompt from stdin, and it has a
+// built-in `image-generator` subagent on the owner's subscription.
+//
+// Unlike Claude it takes NO per-invocation MCP config flag: `agy` rejects
+// `--mcp-config` outright ("flags provided but not defined: -mcp-config", exit
+// 2, every run). It is also unnecessary — registration is persistent, like
+// Hermes and Codex. `ensureAntigravityMcp()` writes
+// ~/.gemini/config/mcp_config.json, which is the same file `agy mcp add`
+// maintains and the one `agy` reads on its own.
 function antigravityCommand() {
-    const args = ["-p", "Follow the instructions provided on standard input.", "--mcp-config", cfgPath, "--output-format", "text"];
+    const args = ["-p", "Follow the instructions provided on standard input.", "--output-format", "text"];
     const model = (process.env.AGY_MODEL || "").trim();
     if (model)
         args.push("--model", model);
@@ -415,6 +473,12 @@ function antigravityCommand() {
     }
     return { cmd: AGY_BIN, args };
 }
+/**
+ * Runs the brain once for the dispatched job(s). Resolves with the CLI's exit
+ * code, or null when it never exited normally (failed to launch, or killed by
+ * the watchdog). The caller uses that to decide whether to back off — see
+ * noteRunResult().
+ */
 function runAgent() {
     return new Promise((resolve) => {
         // Per-run scratch space, created first because the Hermes command line
@@ -503,7 +567,7 @@ function runAgent() {
         }
         // resolve() must fire exactly once — close, error, AND the watchdog can race.
         let settled = false;
-        const finish = (msg) => {
+        const finish = (msg, code = null) => {
             if (settled)
                 return;
             settled = true;
@@ -514,7 +578,7 @@ function runAgent() {
                 rmSync(workDir, { recursive: true, force: true });
             }
             catch { /* best effort */ }
-            resolve();
+            resolve(code);
         };
         // Watchdog: an agent run can HANG indefinitely (e.g. a stalled API response
         // stream that never errors or closes). Without this the promise never
@@ -551,7 +615,7 @@ function runAgent() {
                     : "claude";
         child.stdout.on("data", (d) => process.stdout.write(d));
         child.stderr.on("data", (d) => process.stderr.write(d));
-        child.on("close", (code) => finish(`${AGENT_CLI} finished (exit ${code})`));
+        child.on("close", (code) => finish(`${AGENT_CLI} finished (exit ${code})`, code));
         child.on("error", (e) => finish(`failed to launch ${AGENT_CLI}: ${e.message}. Is the '${binName}' CLI on PATH?`));
     });
 }
@@ -578,6 +642,10 @@ async function tick() {
     }
     if (busy)
         return;
+    // Still serving out the wait after a failed run. The heartbeat above has
+    // already gone out, so the agent stays visibly online while it waits.
+    if (Date.now() < cooldownUntil)
+        return;
     try {
         const data = await api("/api/agent-gateway/jobs");
         const count = data.count ?? (data.jobs?.length || 0);
@@ -588,8 +656,9 @@ async function tick() {
             // effect on the next job without restarting the runner.
             if (IS_CLAUDE)
                 await refreshApprovedConnectors();
-            await runAgent();
+            const code = await runAgent();
             busy = false;
+            noteRunResult(code);
         }
     }
     catch (e) {
