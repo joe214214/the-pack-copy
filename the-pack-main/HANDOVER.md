@@ -3502,3 +3502,179 @@ owner's choice of agent:
 (2) is the smaller and more urgent of the two: it closes the path where a
 paying customer receives counterfeit work. Both are new behaviour, not bug
 fixes, and are **not** implemented.
+
+## 2026-11-15 — Correction: Codex `image_gen` is not a version regression, and not the sandbox's fault
+
+The 2026-11-15 entry above ("Codex `image_gen` is not exposed at `codex-cli
+0.157.0`") recorded the right observation but the wrong diagnosis, and its
+recommendation ("pin the Codex image path to a version where it is exposed")
+cannot work. Investigated after the owner pointed out that image generation
+works for them by hand and asked whether the sandbox was to blame.
+
+### It is not the sandbox
+
+Every probe below ran on the **host**, outside Docker, against the owner's own
+logged-in Codex. None of them produced an image tool.
+
+### It is not the version either
+
+There are two Codex installs on this machine, and both behave the same:
+
+| install | version | path |
+|---|---|---|
+| npm `@openai/codex` (what the sandbox builds) | `codex-cli 0.157.0` | `AppData\Roaming\npm\codex.cmd` |
+| Codex desktop app | `codex-cli 0.162.0-alpha.17.2` | `AppData\Local\OpenAI\Codex\bin\…\codex.exe` |
+
+`codex features list` reports `image_generation  stable  true` in **both**, and
+the 0.157.0 binary still contains the full `image_gen` plumbing (49 string hits,
+including telemetry fields `imagegen_request_id`, `transparent_background`,
+`revised_prompt_present`, `saved_path_present`). So neither the feature flag nor
+the binary is what withholds the tool.
+
+Asking each build to enumerate its own callable tools, headless, with the flag
+explicitly on (`codex exec --enable image_generation --enable view_image`,
+`-m gpt-5.6-terra`):
+
+- **0.157.0** → `functions.wait`, `functions.exec`, `collaboration.*` (6),
+  `mcp__cua_repl.js`, `mcp__cua_repl.js_reset`. No `image_gen`, no `view_image`.
+- **0.162.0-alpha.17.2**, with the desktop app's *entire* plugin stack loaded
+  (`visualize`, `documents`, `spreadsheets`, `presentations`, `pdf`, `browser`,
+  `chrome`, `computer-use`, `unified-computer-use`, `code-review`,
+  `codex-app-tools`) → the same list plus `functions.request_user_input`. Still
+  no `image_gen`.
+
+The newest build with every plugin enabled has no image tool either, so there is
+no version to pin back to.
+
+### The actual cause: code mode
+
+`~/.codex/models_cache.json` lists the models this account can actually use —
+`gpt-6-luna`, `gpt-5.6-terra`, `gpt-5.6-luna` — and **every one of them is
+`tool_mode: "code_mode_only"`**. In code mode the agent is not handed a broad
+native tool list at all; it gets `exec` plus a JS REPL and is expected to
+*write code* to do work. Image generation was a native hosted tool, so it is
+simply not in that world. The REPL runtime
+(`AppData\Local\OpenAI\Codex\runtimes\cua_node\…\bin\node_modules`) ships
+`sharp`, `@img`, `pngjs`, `jpeg-js`, `pixelmatch`, `playwright` — image
+*processing* and browser automation, with no generation entry point
+(`rg -i "imagegen|generateImage|gpt-image"` finds nothing).
+
+So when the owner generates an image "with Codex", that is the **ChatGPT /
+Codex desktop app product surface**, not the CLI agent loop the sandbox drives.
+A rented worker running `codex exec` has no path to a real raster image.
+
+### Separate real bug found: the host model pin is dead
+
+`~/.codex/config.toml` pins `model = "gpt-5.5"`, which this account no longer
+supports. Headless Codex on the host now hard-fails on it:
+
+```
+warning: Model metadata for `gpt-5.5` not found. Defaulting to fallback metadata…
+ERROR: 400 invalid_request_error — The 'gpt-5.5' model is not supported when
+       using Codex with a ChatGPT account. (code: model_not_found)
+```
+
+This does **not** affect the sandbox, because `sandbox/start.sh` copies only
+`auth.json` and not `config.toml` (see the correction two entries up) — the
+container therefore falls back to the account default and runs fine. But the
+owner's own `codex exec` on bare metal is broken until that pin is removed or
+changed to a listed model.
+
+### What this changes
+
+The backlog item "remove the draw-it-anyway Pillow fallback for
+`IMAGE_GENERATION`" gets more urgent, and the alternative ("pin Codex to a
+working version") is struck off as impossible. As of today the only brain in the
+box with a real generator is **Antigravity** (`image-generator` subagent,
+proven end to end). Per the owner's product model, image capability must be
+*declared and surfaced* per worker, never force-routed — a Codex-only worker
+should fail an `IMAGE_GENERATION` order honestly rather than deliver Pillow art.
+
+## 2026-11-15 — Correction to the correction: "Codex cannot generate images" is not a platform fact
+
+The entry immediately above overclaims. It concludes "a rented worker running
+`codex exec` has no path to a real raster image" and treats that as a property
+of the Codex brain. It is not. **Every probe behind it ran against one account,
+and that account is on the free plan.**
+
+The owner's Codex login carries:
+
+```
+chatgpt_plan_type                  = "free"
+chatgpt_subscription_active_until  = 2026-02-09      (lapsed ~9 months ago)
+```
+
+The owner uses their own editor to *simulate a worker*; they are not themselves
+a worker. So that account is one **sample**, not the platform's definition of
+what Codex can do. Nothing above establishes what a paid Codex exposes, and it
+remains unverified in either direction.
+
+### Where the gate actually sits, and why that is the real finding
+
+`image_gen` is an *extension* tool, in the same family as `clock.sleep` and
+`web.search` (binary string: `ExtensionItem · ImageGeneration=image_gen.generation
+· Sleep=clock.sleep · WebSearch=web.search`). Which extension tools a model
+exposes is driven by the **server-sent, per-model `experimental_supported_tools`
+list** in `$CODEX_HOME/models_cache.json`. On this account:
+
+| model | tool_mode | experimental_supported_tools | upgrade |
+|---|---|---|---|
+| gpt-6-luna | code_mode_only | `["send_user_message_async","clock"]` | null |
+| gpt-5.6-terra | code_mode_only | `[]` | null |
+| gpt-5.6-luna | code_mode_only | `[]` | null |
+
+`clock` is listed, so `clock.sleep` works; `image_gen` is listed nowhere, so the
+tool is never offered. That list is **fetched per account identity**
+(`models_cache.json.identity` is an account hash), which makes brain capability
+a property of **the worker's own subscription**, not of `AGENT_CLI=codex`.
+
+Consequence: two workers can both run `AGENT_CLI=codex` and have *different*
+capabilities. That is the normal case, not an edge case. The platform therefore
+cannot hold a static table of "what each brain can do" — any such table is
+wrong for somebody.
+
+### This reverses the backlog priority recorded earlier
+
+The 2026-11-15 entries rank the two agent-realism items as (1) runtime
+capability probe, (2) remove the Pillow fallback, and recommend (2) first as
+"smaller and more urgent". **That ranking was based on treating "can Codex draw"
+as a static fact to be looked up once, which is wrong.** (1) is the primary fix:
+
+- Without a probe there is no honest answer to give, because the answer differs
+  per worker account and can change when a worker's plan changes.
+- (2) alone would make a free-Codex worker fail honestly, but would also make a
+  paid-Codex worker that *can* draw refuse work it is able to do.
+
+### Implementation note: the pattern already exists in the runner
+
+`thepack-mcpb/src/runner.ts` has **no capability probe of any kind** today
+(`grep -i "capabilit|can_generate|supportsImage"` → nothing). But
+`discoverConnectors()` (runner.ts:352) already does exactly the right shape for
+a different question: it shells out to `claude mcp list`, then piggybacks the
+result onto the heartbeat (runner.ts:658) so the website's checklist reflects
+that machine's real account. It is Claude-only and runs on a 5-minute timer.
+
+Extending that to capabilities, for all four brains, is the fix. For Codex
+specifically there is a cheap offline read — parse
+`$CODEX_HOME/models_cache.json`, take the active model's `tool_mode` and
+`experimental_supported_tools` — with **the caveat that this is a cache and the
+step from that list to actual tool exposure is inferred, not proven**. The
+authoritative probe is one real tool-enumeration call at startup, cached for the
+session:
+
+```
+codex exec --skip-git-repo-check --ephemeral --enable image_generation \
+  "List EXACTLY the names of every tool you can call, one per line."
+```
+
+That command is what produced the tool lists in the entry above, and it costs
+~15k tokens per run, so it belongs at startup and not per job.
+
+### Still true from the entry above
+
+- Two Codex installs on this machine (npm `0.157.0`, desktop `0.162.0-alpha.17.2`)
+  both withhold `image_gen` **on this free account**, so it is not a simple
+  version regression and "pin to an older version" is not a fix.
+- The host's `model = "gpt-5.5"` pin is dead (400 `model_not_found`) and the
+  sandbox is unaffected only because `start.sh` copies `auth.json` alone.
+- Antigravity's generator is proven end to end.
