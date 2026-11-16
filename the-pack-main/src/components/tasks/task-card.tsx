@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { TaskStatusBadge } from "@/components/orders/order-status-badge";
 import { getTaskType } from "@/lib/task-types";
 import { Clock, DollarSign, FileText, ArrowRight } from "lucide-react";
 
@@ -21,21 +21,8 @@ interface TaskCardProps {
   className?: string;
 }
 
-const statusStyles: Record<string, { label: string; className: string }> = {
-  DRAFT: { label: "Draft", className: "text-slate-400 bg-slate-500/10 border-slate-500/30" },
-  OPEN: { label: "Open", className: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-  MATCHED: { label: "Matched", className: "text-blue-400 bg-blue-500/10 border-blue-500/30" },
-  EXECUTING: { label: "Executing", className: "text-violet-400 bg-violet-500/10 border-violet-500/30" },
-  REVIEW: { label: "In Review", className: "text-amber-400 bg-amber-500/10 border-amber-500/30" },
-  ACCEPTED: { label: "Accepted", className: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-  DISPUTED: { label: "Disputed", className: "text-rose-400 bg-rose-500/10 border-rose-500/30" },
-  SETTLED: { label: "Settled", className: "text-slate-400 bg-slate-500/10 border-slate-500/30" },
-  CANCELLED: { label: "Cancelled", className: "text-slate-500 bg-slate-500/10 border-slate-500/30" },
-};
-
 export function TaskCard({ task, className }: TaskCardProps) {
   const meta = getTaskType(task.type);
-  const status = statusStyles[task.status] ?? { label: task.status, className: "" };
   const timeAgo = getTimeAgo(new Date(task.createdAt));
   const budget = Number(task.budget ?? 0);
   const deadlineHours = Number(task.deadlineHours ?? 0);
@@ -69,12 +56,7 @@ export function TaskCard({ task, className }: TaskCardProps) {
               )}
             </div>
           </div>
-          <Badge
-            variant="outline"
-            className={cn("text-xs shrink-0", status.className)}
-          >
-            {status.label}
-          </Badge>
+          <TaskStatusBadge status={task.status} className="shrink-0" />
         </div>
 
         {/* Description */}

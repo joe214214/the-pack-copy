@@ -45,6 +45,12 @@ export async function POST(
     return NextResponse.json({ error: "Not your execution" }, { status: 403 });
   }
 
+  // A finished, failed or timed-out execution stays finished: setting a plan
+  // used to flip it back to RUNNING, which let a cancelled order be revived.
+  if (execution.status !== "PENDING" && execution.status !== "RUNNING") {
+    return NextResponse.json({ error: `Execution is ${execution.status}` }, { status: 409 });
+  }
+
   const taskPlan = steps.map((title, i) => ({ id: i + 1, title, status: "pending" as const }));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

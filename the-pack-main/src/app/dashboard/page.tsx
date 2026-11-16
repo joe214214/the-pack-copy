@@ -9,9 +9,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { OrderStatusBadge } from "@/components/orders/order-status-badge";
 import {
   FileText,
   Bot,
@@ -42,7 +42,10 @@ interface DashboardData {
     availableAgents: number;
     newAgentsThisWeek: number;
     openOrders: number;
+    openAsPublisher: number;
+    openAsAgentOwner: number;
     ordersInReview: number;
+    myAgentsWorking: number;
     ownsAgents: boolean;
     totalEarned: number;
     totalSpent: number;
@@ -54,6 +57,7 @@ interface DashboardData {
     status: string;
     amount: number;
     createdAt: string;
+    side: "publisher" | "agent-owner";
   }[];
   platform: {
     completedToday: number;
@@ -63,22 +67,6 @@ interface DashboardData {
     reviewCount: number;
   };
 }
-
-const statusConfig: Record<
-  string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
-> = {
-  CREATED: { label: "Created", variant: "outline" },
-  FUNDED: { label: "Funded", variant: "secondary" },
-  EXECUTING: { label: "Executing", variant: "default" },
-  REVIEW: { label: "In Review", variant: "secondary" },
-  REVISION_REQUESTED: { label: "Revision", variant: "secondary" },
-  ACCEPTED: { label: "Accepted", variant: "outline" },
-  DISPUTED: { label: "Disputed", variant: "destructive" },
-  SETTLED: { label: "Settled", variant: "outline" },
-  REFUNDED: { label: "Refunded", variant: "outline" },
-  CANCELLED: { label: "Cancelled", variant: "outline" },
-};
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -115,6 +103,8 @@ export default function DashboardPage() {
     !!data &&
     s!.activeTasks === 0 &&
     s!.openOrders === 0 &&
+    s!.openAsAgentOwner === 0 &&
+    s!.myAgentsWorking === 0 &&
     data.recentOrders.length === 0;
 
   const statCards = [
@@ -152,6 +142,12 @@ export default function DashboardPage() {
           ? `${s.ordersInReview} waiting on you`
           : "nothing to review"
         : "",
+      // Split by side, so an agent owner can tell their own orders from the
+      // ones their agents are working on.
+      detail:
+        s?.ownsAgents && s.openOrders > 0
+          ? `${s.openAsPublisher} yours · ${s.openAsAgentOwner} your agents'`
+          : undefined,
       trend: "neutral" as const,
       icon: ShoppingCart,
       color: "text-amber-400",
@@ -225,6 +221,9 @@ export default function DashboardPage() {
                 )}
                 <p className="text-xs text-muted-foreground">{stat.change}</p>
               </div>
+              {"detail" in stat && stat.detail && (
+                <p className="mt-0.5 text-xs text-muted-foreground/70">{stat.detail}</p>
+              )}
             </CardContent>
             {/* Subtle gradient overlay on hover */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -295,18 +294,20 @@ export default function DashboardPage() {
                         <p className="truncate text-sm font-medium leading-none">
                           {order.task}
                         </p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {order.agent}
-                        </p>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                          <p className="truncate text-xs text-muted-foreground">
+                            {order.agent}
+                          </p>
+                          {order.side === "agent-owner" && (
+                            <span className="shrink-0 rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-px text-[10px] font-medium text-violet-400">
+                              Your agent
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 @sm:justify-end">
-                      <Badge
-                        variant={statusConfig[order.status]?.variant ?? "secondary"}
-                        className="text-xs"
-                      >
-                        {statusConfig[order.status]?.label ?? order.status}
-                      </Badge>
+                      <OrderStatusBadge status={order.status} />
                       <div className="text-right">
                         <p className="text-sm font-medium tabular-nums">
                           ${order.amount.toFixed(2)}

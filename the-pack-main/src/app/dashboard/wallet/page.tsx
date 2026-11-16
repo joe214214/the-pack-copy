@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   Wallet, TrendingUp, TrendingDown, Lock, ArrowUpRight,
-  ArrowDownRight, Plus, Clock, CheckCircle2, RefreshCw, CreditCard, Zap, ShieldCheck, DollarSign,
+  ArrowDownRight, Plus, History, CheckCircle2, RefreshCw, CreditCard, Zap, ShieldCheck, DollarSign,
+  Receipt, SlidersHorizontal, Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,17 +14,22 @@ import { Button } from "@/components/ui/button";
 import { PageSkeleton, StatsRowSkeleton, RowListSkeleton } from "@/components/ui/loading-skeletons";
 
 const n = (v: unknown) => Number(v ?? 0);
-type TxType = "charge" | "refund" | "escrow" | "earning" | "deposit";
+type TxType = "escrow" | "charge" | "fee" | "refund" | "earning" | "deposit" | "adjustment" | "opening";
+type TxStatus = "completed" | "held" | "legacy";
 
 interface Transaction {
   id: string;
   type: TxType;
+  /** Effect on the available balance, signed. */
   amount: number;
+  /** Effect on escrow, signed. */
+  escrowDelta: number;
   description: string;
   taskTitle: string;
   agentName: string;
+  orderId: string | null;
   date: string;
-  status: string;
+  status: TxStatus;
 }
 
 interface WalletData {
@@ -36,38 +42,87 @@ interface WalletData {
 }
 
 // ─── Tx type config ───────────────────────────────────────────────────────────
-const txConfig: Record<TxType, { label: string; icon: React.ReactNode; color: string; sign: string }> = {
+const txConfig: Record<TxType, { label: string; icon: React.ReactNode; color: string; bg: string }> = {
   charge: {
     label: "Payment",
     icon: <ArrowUpRight className="h-4 w-4" />,
     color: "text-rose-400",
-    sign: "-",
+    bg: "bg-rose-500/10",
+  },
+  fee: {
+    label: "Platform fee",
+    icon: <Receipt className="h-4 w-4" />,
+    color: "text-rose-400",
+    bg: "bg-rose-500/10",
   },
   refund: {
     label: "Refund",
     icon: <ArrowDownRight className="h-4 w-4" />,
     color: "text-emerald-400",
-    sign: "+",
+    bg: "bg-emerald-500/10",
   },
   escrow: {
-    label: "In Escrow",
+    label: "Escrow",
     icon: <Lock className="h-4 w-4" />,
     color: "text-amber-400",
-    sign: "-",
+    bg: "bg-amber-500/10",
   },
   earning: {
     label: "Earnings",
     icon: <Zap className="h-4 w-4" />,
     color: "text-violet-400",
-    sign: "+",
+    bg: "bg-violet-500/10",
   },
   deposit: {
     label: "Deposit",
     icon: <ArrowDownRight className="h-4 w-4" />,
     color: "text-emerald-400",
-    sign: "+",
+    bg: "bg-emerald-500/10",
+  },
+  adjustment: {
+    label: "Adjustment",
+    icon: <SlidersHorizontal className="h-4 w-4" />,
+    color: "text-sky-400",
+    bg: "bg-sky-500/10",
+  },
+  opening: {
+    label: "Opening balance",
+    icon: <Sparkles className="h-4 w-4" />,
+    color: "text-slate-400",
+    bg: "bg-slate-500/10",
   },
 };
+
+const statusConfig: Record<TxStatus, { label: string; className: string; icon: React.ReactNode }> = {
+  completed: {
+    label: "Completed",
+    className: "text-emerald-400 border-emerald-500/30",
+    icon: <CheckCircle2 className="h-3 w-3 mr-1" />,
+  },
+  held: {
+    label: "In escrow",
+    className: "text-amber-400 border-amber-500/30",
+    icon: <Lock className="h-3 w-3 mr-1" />,
+  },
+  legacy: {
+    label: "Before ledger",
+    className: "text-muted-foreground",
+    icon: <History className="h-3 w-3 mr-1" />,
+  },
+};
+
+// Filter tabs. Every type falls under exactly one tab besides "All".
+const FILTERS = [
+  { id: "all", label: "All", types: null },
+  { id: "payments", label: "Payments", types: ["charge", "fee"] },
+  { id: "escrow", label: "Escrow", types: ["escrow"] },
+  { id: "earning", label: "Earnings", types: ["earning"] },
+  { id: "refund", label: "Refunds", types: ["refund"] },
+  { id: "other", label: "Other", types: ["deposit", "adjustment", "opening"] },
+] as const satisfies readonly { id: string; label: string; types: readonly TxType[] | null }[];
+type FilterId = (typeof FILTERS)[number]["id"];
+
+const money = (v: number) => `$${Math.abs(v).toFixed(2)}`;
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({
@@ -100,45 +155,44 @@ function StatCard({
 
 // ─── Transaction Row ──────────────────────────────────────────────────────────
 function TxRow({ tx }: { tx: Transaction }) {
-  const cfg = txConfig[tx.type];
-  const isPositive = tx.type === "earning" || tx.type === "refund" || tx.type === "deposit";
+  const cfg = txConfig[tx.type] ?? txConfig.adjustment;
+  const st = statusConfig[tx.status] ?? statusConfig.completed;
+  const amount = n(tx.amount);
+  const isPositive = amount > 0;
+  const escrow = n(tx.escrowDelta);
 
   return (
     <div className="flex items-center gap-4 py-3 border-b border-border/40 last:border-0">
-      <div className={cn(
-        "h-9 w-9 shrink-0 rounded-full flex items-center justify-center",
-        tx.type === "charge" ? "bg-rose-500/10" :
-        tx.type === "escrow" ? "bg-amber-500/10" :
-        tx.type === "earning" ? "bg-violet-500/10" :
-        "bg-emerald-500/10"
-      )}>
+      <div className={cn("h-9 w-9 shrink-0 rounded-full flex items-center justify-center", cfg.bg)}>
         <span className={cfg.color}>{cfg.icon}</span>
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{tx.taskTitle}</p>
-        <p className="text-xs text-muted-foreground">
-          {cfg.label} · {tx.agentName}
+        <p className="text-sm font-medium truncate">{tx.taskTitle || tx.description || cfg.label}</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {[tx.taskTitle ? tx.description : cfg.label, tx.agentName].filter(Boolean).join(" · ")}
         </p>
       </div>
       <div className="text-right shrink-0">
-        <p className={cn("text-sm font-semibold", isPositive ? "text-emerald-400" : "text-foreground")}>
-          {isPositive ? "+" : "−"}${Math.abs(tx.amount).toFixed(2)}
+        <p
+          className={cn(
+            "text-sm font-semibold tabular-nums",
+            isPositive ? "text-emerald-400" : amount < 0 ? "text-foreground" : "text-muted-foreground"
+          )}
+        >
+          {isPositive ? "+" : amount < 0 ? "−" : ""}{money(amount)}
         </p>
+        {escrow !== 0 && (
+          <p className="text-xs text-amber-400/80 tabular-nums">
+            {escrow > 0 ? `+${money(escrow)} to escrow` : `−${money(escrow)} from escrow`}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           {new Date(tx.date).toLocaleDateString()}
         </p>
       </div>
-      <Badge
-        variant="outline"
-        className={cn(
-          "text-xs shrink-0 capitalize",
-          tx.status === "completed" ? "text-emerald-400 border-emerald-500/30" :
-          tx.status === "executing" || tx.status === "review" ? "text-amber-400 border-amber-500/30" :
-          "text-muted-foreground"
-        )}
-      >
-        {tx.status === "completed" ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <Clock className="h-3 w-3 mr-1" />}
-        {tx.status}
+      <Badge variant="outline" className={cn("text-xs shrink-0", st.className)}>
+        {st.icon}
+        {st.label}
       </Badge>
     </div>
   );
@@ -148,7 +202,7 @@ function TxRow({ tx }: { tx: Transaction }) {
 export default function WalletPage() {
   const [data, setData] = useState<WalletData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<TxType | "all">("all");
+  const [filter, setFilter] = useState<FilterId>("all");
 
   const fetchWallet = async () => {
     setLoading(true);
@@ -162,8 +216,9 @@ export default function WalletPage() {
 
   useEffect(() => { fetchWallet(); }, []);
 
+  const filterTypes: readonly TxType[] | null = FILTERS.find((f) => f.id === filter)?.types ?? null;
   const filteredTx = data?.transactions.filter(
-    (tx) => filter === "all" || tx.type === filter
+    (tx) => !filterTypes || filterTypes.includes(tx.type)
   ) ?? [];
 
   if (loading) {
@@ -244,6 +299,9 @@ export default function WalletPage() {
           gradient="bg-gradient-to-br from-violet-500 to-blue-500"
         />
       </div>
+      <p className="-mt-3 text-xs text-muted-foreground">
+        Escrow is money held for your orders in progress. It goes to the agent when you accept the work, or back to you if the order is cancelled.
+      </p>
 
       {/* Mock Stripe strip */}
       <Card className="border-dashed border-primary/30 bg-primary/3">
@@ -272,18 +330,18 @@ export default function WalletPage() {
             </div>
             {/* Filter chips */}
             <div className="flex flex-wrap gap-1.5">
-              {(["all", "charge", "escrow", "earning", "refund"] as const).map((f) => (
+              {FILTERS.map((f) => (
                 <button
-                  key={f}
-                  onClick={() => setFilter(f)}
+                  key={f.id}
+                  onClick={() => setFilter(f.id)}
                   className={cn(
                     "text-xs px-3 py-1 rounded-full border transition-colors",
-                    filter === f
+                    filter === f.id
                       ? "bg-primary text-primary-foreground border-primary"
                       : "border-border/50 text-muted-foreground hover:border-primary/50"
                   )}
                 >
-                  {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+                  {f.label}
                 </button>
               ))}
             </div>
@@ -294,7 +352,9 @@ export default function WalletPage() {
             <div className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
               <Wallet className="h-10 w-10 opacity-30" />
               <div>
-                <p className="font-medium text-foreground">No transactions yet</p>
+                <p className="font-medium text-foreground">
+                  {filter === "all" ? "No transactions yet" : "No transactions of this kind"}
+                </p>
                 <p className="mt-1 text-sm">
                   Escrow, fees and payouts appear here once a task of yours runs.
                 </p>

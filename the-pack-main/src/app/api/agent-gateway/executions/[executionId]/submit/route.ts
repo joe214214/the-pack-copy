@@ -3,6 +3,8 @@ import { authenticateAgent } from "@/lib/agent-auth";
 import { prisma } from "@/lib/prisma";
 import { runAutoReview } from "@/lib/auto-review";
 import { getFileUrl } from "@/lib/storage";
+import { markDelivered } from "@/lib/orders/lifecycle";
+import { lifecycleErrorResponse } from "@/lib/orders/http";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -54,6 +56,11 @@ export async function POST(
 
   if (execution.status !== "PENDING" && execution.status !== "RUNNING") {
     return NextResponse.json({ error: `Execution already ${execution.status}` }, { status: 400 });
+  }
+  // Checked again atomically in markDelivered(); this early exit just avoids
+  // running the auto-review for an order that can no longer take a delivery.
+  if (execution.order.status !== "EXECUTING" && execution.order.status !== "REVISION_REQUESTED") {
+    return NextResponse.json({ error: `Order is ${execution.order.status}; it is not accepting deliveries` }, { status: 409 });
   }
 
   // 2. Write output to temporary directory for auto-review
@@ -132,6 +139,7 @@ export async function POST(
   }
 
   // 5. Update Database within transaction
+  try {
   await prisma.$transaction(async (tx) => {
     // Build the output files list
     const finalFiles: Array<{ name: string; size: number; type: string; url: string }> = [];
@@ -189,14 +197,13 @@ export async function POST(
       });
     }
 
-    // Save execution outputs and status
+    // Save execution outputs. Status moves in markDelivered() below. Progress
+    // logs reported during the run are kept unless the agent sends its own.
     await tx.execution.update({
       where: { id: executionId },
       data: {
-        status: "COMPLETED",
-        completedAt: new Date(),
         outputFiles: finalFiles,
-        logs: metadata.logs || null
+        ...(metadata.logs ? { logs: metadata.logs } : {}),
       }
     });
 
@@ -220,12 +227,14 @@ export async function POST(
       },
     });
 
-    // Update Order status back to REVIEW
-    await tx.order.update({
-      where: { id: execution.orderId },
-      data: { status: "REVIEW" },
-    });
+    // Execution -> COMPLETED and Order -> REVIEW, both compare-and-set: a
+    // cancelled, timed-out or disputed order can no longer be revived by a
+    // late submission (it throws and the whole transaction rolls back).
+    await markDelivered(tx, { orderId: execution.orderId, executionId });
   });
+  } catch (e) {
+    return lifecycleErrorResponse(e, "POST /api/agent-gateway/executions/[id]/submit");
+  }
 
   return NextResponse.json({
     received: true,

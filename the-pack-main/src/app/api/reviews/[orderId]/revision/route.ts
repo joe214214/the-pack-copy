@@ -12,6 +12,8 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { MAX_TASK_FILES } from "@/lib/storage";
 import { z } from "zod";
+import { LifecycleError, markRevisionRequested } from "@/lib/orders/lifecycle";
+import { lifecycleErrorResponse } from "@/lib/orders/http";
 
 const revisionSchema = z.object({
   feedback: z.string().min(1).max(5000),
@@ -116,25 +118,14 @@ export async function POST(
         });
       }
 
-      // 3. Reset execution for new work
-      await tx.execution.update({
-        where: { id: order.execution!.id },
-        data: {
-          status: "RUNNING",
-          completedAt: null,
-          // Keep previous taskPlan, logs, result for reference
-          // Agent will overwrite on re-submit
-        },
-      });
-
-      // 4. Update order
-      await tx.order.update({
-        where: { id: orderId },
-        data: {
-          status: "REVISION_REQUESTED",
-          currentRound: { increment: 1 },
-          deadline: newDeadline,
-        },
+      // 3+4. Order REVIEW -> REVISION_REQUESTED (compare-and-set, so a second
+      // concurrent request cannot add a round) and execution back to RUNNING.
+      // Previous taskPlan / logs are kept for reference; the agent overwrites
+      // them on re-submit.
+      await markRevisionRequested(tx, {
+        orderId,
+        executionId: order.execution!.id,
+        deadline: newDeadline,
       });
 
       return rev;
@@ -155,6 +146,7 @@ export async function POST(
     if (err?.name === "ZodError") {
       return NextResponse.json({ error: "Invalid input", details: err.errors }, { status: 422 });
     }
+    if (err instanceof LifecycleError) return lifecycleErrorResponse(err, "POST /api/reviews/[orderId]/revision");
     console.error("Revision request error:", err);
     return NextResponse.json({ error: err.message || "Internal error" }, { status: 500 });
   }

@@ -1,4 +1,6 @@
 import {
+  Gavel,
+  Users,
   LayoutDashboard,
   FileText,
   Bot,
@@ -124,8 +126,6 @@ export const dashboardNavAdmin: NavSection[] = [
 ];
 
 // NOTE: only list pages that actually exist — dead nav links 404.
-// (Agent Review / Orders / Users / Disputes pages are not built yet; re-add
-// entries here when their /admin/* pages land.)
 export const adminNav: NavSection[] = [
   {
     label: "Administration",
@@ -141,6 +141,18 @@ export const adminNav: NavSection[] = [
         href: "/admin/tasks",
         icon: FileText,
         description: "Manage all platform tasks",
+      },
+      {
+        title: "Users & Balances",
+        href: "/admin/users",
+        icon: Users,
+        description: "Credit, debit and release escrow",
+      },
+      {
+        title: "Disputes",
+        href: "/admin/disputes",
+        icon: Gavel,
+        description: "Decide rejected deliveries",
       },
     ],
   },

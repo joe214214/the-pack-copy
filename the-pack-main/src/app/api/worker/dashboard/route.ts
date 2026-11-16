@@ -8,6 +8,7 @@
  * - Earnings summary
  */
 import { NextResponse } from "next/server";
+import { OPEN_ORDER_STATUSES } from "@/lib/status";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import type { TaskType } from "@/generated/prisma/enums";
@@ -50,7 +51,9 @@ export async function GET() {
     // 2. Collect all supported task types across user's agents
     const allTaskTypes = new Set<TaskType>();
     for (const agent of agents) {
-      for (const t of agent.acceptTaskTypes) {
+      // supportedTaskTypes is what openOrder() checks, so it is what decides
+      // which tasks this owner can actually take.
+      for (const t of agent.supportedTaskTypes) {
         allTaskTypes.add(t);
       }
     }
@@ -60,7 +63,10 @@ export async function GET() {
       ? await prisma.task.findMany({
           where: {
             status: "OPEN",
+            order: null,
             type: { in: Array.from(allTaskTypes) },
+            // An owner cannot take their own task, so don't offer it.
+            publisherId: { not: userId },
           },
           select: {
             id: true,
@@ -79,13 +85,14 @@ export async function GET() {
         })
       : [];
 
-    // 4. Get active orders for user's agents (EXECUTING or REVIEW)
+    // 4. Active orders for the user's agents: everything not finished yet,
+    //    including revisions and disputes (same set as everywhere else).
     const agentIds = agents.map((a) => a.id);
     const activeOrders = agentIds.length > 0
       ? await prisma.order.findMany({
           where: {
             agentId: { in: agentIds },
-            status: { in: ["EXECUTING", "REVIEW"] },
+            status: { in: OPEN_ORDER_STATUSES },
           },
           include: {
             task: { select: { title: true, type: true, description: true } },

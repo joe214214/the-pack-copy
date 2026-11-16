@@ -5,33 +5,59 @@ import { cn } from "@/lib/utils";
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";
 import { getTaskType } from "@/lib/task-types";
 import { CreditTierBadge } from "@/components/agents/credit-tier-badge";
+import { ORDER_GROUPS, TERMINAL_ORDER_STATUSES } from "@/lib/status";
 import { Bot, Clock, DollarSign, ArrowRight, User } from "lucide-react";
 
+/** Which side of the order the viewer is on (from GET /api/orders). */
+export type OrderSide = "publisher" | "agent-owner" | "both" | "admin";
+
+export interface OrderCardData {
+  id: string;
+  status: string;
+  price: number | string;
+  platformFee: number | string;
+  createdAt: string | Date;
+  deadline: string | Date;
+  side?: OrderSide;
+  task: { id: string; title: string; type: string } | null;
+  agent: { id: string; name: string; slug: string; creditTier: string } | null;
+  publisher: { id: string; name: string } | null;
+  settlement?: { agentPayout: number | string | null } | null;
+}
+
 interface OrderCardProps {
-  order: {
-    id: string;
-    status: string;
-    price: number | string;
-    platformFee: number | string;
-    createdAt: string | Date;
-    deadline: string | Date;
-    task: { id: string; title: string; type: string } | null;
-    agent: { id: string; name: string; slug: string; creditTier: string } | null;
-    publisher: { id: string; name: string } | null;
-    settlement?: { agentPayout: number | string } | null;
-  };
-  viewAs?: "publisher" | "agent-owner";
+  order: OrderCardData;
   className?: string;
 }
 
-export function OrderCard({ order, viewAs = "publisher", className }: OrderCardProps) {
+/** Statuses in which the agent is still expected to deliver — the only ones that can be overdue. */
+const IN_PROGRESS_STATUSES: readonly string[] = ORDER_GROUPS.in_progress;
+/** Agent's share when nothing has been settled yet (the platform keeps 10%). */
+const EST_AGENT_SHARE = 0.9;
+
+const SIDE_HINT: Partial<Record<OrderSide, string>> = {
+  publisher: "You published",
+  "agent-owner": "Your agent",
+  both: "Your agent · You published",
+};
+
+export function OrderCard({ order, className }: OrderCardProps) {
+  const side: OrderSide = order.side ?? "publisher";
   const price = Number(order.price ?? 0);
   const fee = Number(order.platformFee ?? 0);
-  const payout = Number(order.settlement?.agentPayout ?? 0);
+  const settledPayout = order.settlement?.agentPayout != null ? Number(order.settlement.agentPayout) : null;
+  const isSettled = order.status === "SETTLED" && settledPayout != null;
+  const isClosed = order.status === "CANCELLED" || order.status === "REFUNDED";
   const taskMeta = getTaskType(order.task?.type ?? "");
   const deadline = new Date(order.deadline);
-  const isOverdue = deadline < new Date() && !["ACCEPTED", "SETTLED", "CANCELLED"].includes(order.status);
+  // Only work the agent still owes can be late: delivered (REVIEW), disputed
+  // and finished orders never show as overdue.
+  const isInProgress =
+    IN_PROGRESS_STATUSES.includes(order.status) &&
+    !(TERMINAL_ORDER_STATUSES as readonly string[]).includes(order.status);
+  const isOverdue = isInProgress && deadline < new Date();
   const timeLeft = getTimeLeft(deadline);
+  const sideHint = SIDE_HINT[side];
 
   return (
     <Link href={`/dashboard/orders/${order.id}`}>
@@ -72,7 +98,13 @@ export function OrderCard({ order, viewAs = "publisher", className }: OrderCardP
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+          {sideHint && (
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {sideHint}
+            </p>
+          )}
+
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Bot className="h-3 w-3" />
               {order.agent?.name ?? "Unassigned"}
@@ -84,16 +116,28 @@ export function OrderCard({ order, viewAs = "publisher", className }: OrderCardP
               <User className="h-3 w-3" />
               {order.publisher?.name ?? "Unknown"}
             </span>
-            {viewAs === "agent-owner" && payout > 0 ? (
-              <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                <DollarSign className="h-3 w-3" />
-                Earn ${payout.toFixed(2)}
-              </span>
+            {side === "agent-owner" ? (
+              isClosed ? (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <DollarSign className="h-3 w-3" />
+                  No payout
+                </span>
+              ) : isSettled ? (
+                <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                  <DollarSign className="h-3 w-3" />
+                  Earn ${settledPayout.toFixed(2)}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-emerald-400/80 font-medium">
+                  <DollarSign className="h-3 w-3" />
+                  Est. earnings ${(price * EST_AGENT_SHARE).toFixed(2)}
+                </span>
+              )
             ) : (
               <span className="flex items-center gap-1 text-foreground/70">
                 <DollarSign className="h-3 w-3" />
                 ${price.toFixed(2)}
-                <span className="text-muted-foreground">(−${fee.toFixed(2)} fee)</span>
+                {fee > 0 && <span className="text-muted-foreground">(−${fee.toFixed(2)} fee)</span>}
               </span>
             )}
           </div>
@@ -101,10 +145,12 @@ export function OrderCard({ order, viewAs = "publisher", className }: OrderCardP
 
         {/* Deadline + arrow */}
         <div className="flex items-center gap-3 shrink-0">
-          <div className={cn("flex items-center gap-1 text-xs", isOverdue ? "text-rose-400" : "text-muted-foreground")}>
-            <Clock className="h-3.5 w-3.5" />
-            <span>{isOverdue ? "Overdue" : timeLeft}</span>
-          </div>
+          {isInProgress && (
+            <div className={cn("flex items-center gap-1 text-xs", isOverdue ? "text-rose-400" : "text-muted-foreground")}>
+              <Clock className="h-3.5 w-3.5" />
+              <span>{isOverdue ? "Overdue" : timeLeft}</span>
+            </div>
+          )}
           <ArrowRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-primary transition-colors" />
         </div>
       </div>
@@ -114,7 +160,7 @@ export function OrderCard({ order, viewAs = "publisher", className }: OrderCardP
 
 function getTimeLeft(deadline: Date): string {
   const diff = deadline.getTime() - Date.now();
-  if (diff <= 0) return "Overdue";
+  if (diff <= 0) return "Due now";
   const mins = Math.floor(diff / 60000);
   if (mins < 60) return `${mins}m left`;
   const hrs = Math.floor(mins / 60);

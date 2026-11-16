@@ -1,47 +1,54 @@
 /**
- * GET  /api/orders          — List orders (scope: mine-publisher | mine-agent | all)
- * POST /api/orders          — Create a new order (place bid on a task)
+ * GET /api/orders — List orders the current user is part of.
+ *
+ *   ?scope=  mine (default) — orders I published OR my agents are working on
+ *            publisher      — only orders I published
+ *            agent-owner    — only orders my agents are working on ("agent" also accepted)
+ *            all            — every order (admin only)
+ *   ?status= a group from src/lib/status.ts (in_progress, awaiting_review,
+ *            disputed, completed, closed), a status, or a comma list of either
+ *   ?limit=, ?offset=
+ *
+ * Each order carries `side`: "publisher" | "agent-owner" | "both" from the
+ * caller's point of view. `counts` gives the number in every group for the
+ * same scope, so filter tabs can show totals that always add up.
+ *
+ * POST used to create a legacy CREATED order that no agent ever picked up.
+ * Work now starts with POST /api/tasks/[id]/assign or the agent's claim_task.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { freezeBalance, calculateFees, InsufficientBalanceError } from "@/lib/balance";
 import { getCurrentUser } from "@/lib/auth";
-import { z } from "zod";
-
-// ─── GET ─────────────────────────────────────────────────────────────────────
+import type { Prisma } from "@/generated/prisma/client";
+import { ORDER_GROUPS, parseOrderStatusFilter, type OrderGroup } from "@/lib/status";
 
 export async function GET(request: NextRequest) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { searchParams } = new URL(request.url);
-    const scope = searchParams.get("scope") ?? "publisher";
-    const status = searchParams.get("status");
-    const limit = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
-    const offset = parseInt(searchParams.get("offset") ?? "0");
+    const scope = searchParams.get("scope") ?? "mine";
+    const statuses = parseOrderStatusFilter(searchParams.get("status"));
+    const limit = Math.min(Math.max(parseInt(searchParams.get("limit") ?? "20") || 20, 1), 100);
+    const offset = Math.max(parseInt(searchParams.get("offset") ?? "0") || 0, 0);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = {};
-    // Admins may view everything with ?scope=all
-    if (scope === "all" && user.isAdmin) {
-      // no user filter
-    } else if (scope === "agent" || scope === "agent-owner") {
-      where.agent = { ownerId: user.id };
-    } else {
-      // default: as publisher
-      where.publisherId = user.id;
-    }
-    if (status) where.status = status;
+    let scopeWhere: Prisma.OrderWhereInput;
+    if (scope === "all" && user.isAdmin) scopeWhere = {};
+    else if (scope === "publisher") scopeWhere = { publisherId: user.id };
+    else if (scope === "agent" || scope === "agent-owner") scopeWhere = { agent: { ownerId: user.id } };
+    else scopeWhere = { OR: [{ publisherId: user.id }, { agent: { ownerId: user.id } }] };
 
-    const [orders, total] = await Promise.all([
+    const where: Prisma.OrderWhereInput = statuses ? { AND: [scopeWhere, { status: { in: statuses } }] } : scopeWhere;
+
+    const [orders, total, byStatus] = await Promise.all([
       prisma.order.findMany({
         where,
         include: {
-          task: { select: { id: true, title: true, type: true } },
-          agent: { select: { id: true, name: true, slug: true, creditTier: true } },
+          task: { select: { id: true, title: true, type: true, status: true } },
+          agent: { select: { id: true, name: true, slug: true, creditTier: true, ownerId: true } },
           publisher: { select: { id: true, name: true } },
           execution: { select: { status: true, startedAt: true, completedAt: true } },
           review: { select: { userRating: true, autoPassed: true, userAccepted: true } },
@@ -52,132 +59,39 @@ export async function GET(request: NextRequest) {
         skip: offset,
       }),
       prisma.order.count({ where }),
+      prisma.order.groupBy({ by: ["status"], where: scopeWhere, _count: { _all: true } }),
     ]);
 
-    return NextResponse.json({ orders, total, limit, offset });
+    const counts = Object.fromEntries(
+      (Object.keys(ORDER_GROUPS) as OrderGroup[]).map((g) => [
+        g,
+        byStatus
+          .filter((b) => (ORDER_GROUPS[g] as readonly string[]).includes(b.status))
+          .reduce((s, b) => s + b._count._all, 0),
+      ])
+    ) as Record<OrderGroup, number>;
+    const all = byStatus.reduce((s, b) => s + b._count._all, 0);
+
+    return NextResponse.json({
+      orders: orders.map((o) => {
+        const pub = o.publisherId === user.id;
+        const own = o.agent.ownerId === user.id;
+        return { ...o, side: pub && own ? "both" : pub ? "publisher" : own ? "agent-owner" : "admin" };
+      }),
+      total,
+      counts: { all, ...counts },
+      limit,
+      offset,
+    });
   } catch (error) {
     console.error("[GET /api/orders]", error);
     return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 });
   }
 }
 
-// ─── POST ────────────────────────────────────────────────────────────────────
-
-const createOrderSchema = z.object({
-  taskId: z.string(),
-  agentId: z.string(),
-});
-
-export async function POST(request: NextRequest) {
-  try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { taskId, agentId } = createOrderSchema.parse(body);
-
-    // 1. Validate task is OPEN and not already ordered
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: { order: true, publisher: true },
-    });
-
-    if (!task) {
-      return NextResponse.json({ error: "Task not found" }, { status: 404 });
-    }
-    if (task.publisherId !== user.id && !user.isAdmin) {
-      return NextResponse.json({ error: "You can only hire for your own tasks" }, { status: 403 });
-    }
-    if (task.status !== "OPEN") {
-      return NextResponse.json({ error: `Task is ${task.status}, not OPEN` }, { status: 409 });
-    }
-    if (task.order) {
-      return NextResponse.json({ error: "Task already has an order" }, { status: 409 });
-    }
-
-    // 2. Validate agent is ACTIVE
-    const agent = await prisma.agent.findUnique({
-      where: { id: agentId },
-      include: { owner: true },
-    });
-
-    if (!agent || agent.status !== "ACTIVE") {
-      return NextResponse.json({ error: "Agent not available" }, { status: 404 });
-    }
-
-    // 3. Calculate fees
-    const price = Number(task.budget);
-    const { platformFee, escrowAmount } = calculateFees(price);
-
-    // 4. Publisher ID — use task's publisher for now
-    const publisherId = task.publisherId;
-
-    // 5. Freeze publisher balance (escrow)
-    try {
-      await freezeBalance(publisherId, escrowAmount);
-    } catch (err) {
-      if (err instanceof InsufficientBalanceError) {
-        return NextResponse.json({ error: err.message }, { status: 402 });
-      }
-      throw err;
-    }
-
-    // 6. Create order + update task status atomically
-    const deadline = new Date(Date.now() + task.deadlineHours * 60 * 60 * 1000);
-
-    const order = await prisma.$transaction(async (tx) => {
-      const newOrder = await tx.order.create({
-        data: {
-          taskId,
-          agentId,
-          publisherId,
-          price,
-          platformFee,
-          escrowAmount,
-          paymentMethod: "BALANCE",
-          status: "CREATED",
-          deadline,
-        },
-        include: {
-          task: { select: { id: true, title: true, type: true } },
-          agent: { select: { id: true, name: true, slug: true } },
-          publisher: { select: { id: true, name: true } },
-        },
-      });
-
-      // Update task and agent stats
-      await tx.task.update({
-        where: { id: taskId },
-        data: { status: "MATCHED" },
-      });
-
-      await tx.agent.update({
-        where: { id: agentId },
-        data: { totalOrders: { increment: 1 } },
-      });
-
-      // Audit log
-      await tx.auditLog.create({
-        data: {
-          actorId: publisherId,
-          action: "order.create",
-          entityType: "order",
-          entityId: newOrder.id,
-          details: { taskId, agentId, price, platformFee },
-        },
-      });
-
-      return newOrder;
-    });
-
-    return NextResponse.json({ order }, { status: 201 });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Validation failed", details: error.issues }, { status: 422 });
-    }
-    console.error("[POST /api/orders]", error);
-    return NextResponse.json({ error: "Failed to create order" }, { status: 500 });
-  }
+export async function POST() {
+  return NextResponse.json(
+    { error: "Gone: orders are created when an agent takes a task (POST /api/tasks/[id]/assign or the agent's claim_task)." },
+    { status: 410 }
+  );
 }

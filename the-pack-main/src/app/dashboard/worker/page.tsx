@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { OrderStatusBadge } from "@/components/orders/order-status-badge";
+import { orderStatusMeta } from "@/lib/status";
 import {
   Bot,
   Wifi,
@@ -334,17 +336,17 @@ function TaskRow({
 // ─── Active Order Row ────────────────────────────────────────────────────────
 
 function ActiveOrderRow({ order }: { order: ActiveOrder }) {
-  const isReview = order.status === "REVIEW";
+  const meta = orderStatusMeta(order.status);
   return (
     <div className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50">
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${isReview ? "bg-amber-500/10" : "bg-blue-500/10"}`}>
-          <Zap className={`h-4 w-4 ${isReview ? "text-amber-400" : "text-blue-400"}`} />
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${meta.bg}`}>
+          <Zap className={`h-4 w-4 ${meta.color}`} />
         </div>
         <div className="min-w-0">
           <p className="text-sm font-medium leading-none truncate">{order.task.title}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {order.agent.name} · {isReview ? "Awaiting Review" : "Executing..."}
+            {order.agent.name}
           </p>
         </div>
       </div>
@@ -358,9 +360,7 @@ function ActiveOrderRow({ order }: { order: ActiveOrder }) {
             {timeRemaining(order.deadline)}
           </p>
         </div>
-        <Badge variant={isReview ? "secondary" : "default"} className="text-[10px]">
-          {isReview ? "Review" : "Running"}
-        </Badge>
+        <OrderStatusBadge status={order.status} className="text-[10px]" />
       </div>
     </div>
   );

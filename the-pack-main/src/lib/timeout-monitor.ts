@@ -1,65 +1,19 @@
-import { prisma } from "@/lib/prisma";
-import { releaseBalance } from "@/lib/balance";
+/**
+ * Order timers, run by the worker (`npm run worker`) and by the cron route
+ * (GET /api/cron/maintenance):
+ *   - an order past its deadline without a delivery is cancelled and refunded
+ *     (EXECUTING and REVISION_REQUESTED — revisions have deadlines too);
+ *   - a delivery left in REVIEW for AUTO_ACCEPT_DAYS (default 7) is accepted
+ *     and paid out.
+ * The work itself is runOrderMaintenance() in the order lifecycle module.
+ */
+import { runOrderMaintenance } from "@/lib/orders/lifecycle";
 
 export async function checkTimeouts() {
-  console.log("[TimeoutMonitor] Checking for expired orders...");
-  const now = new Date();
-
-  // Find orders that are still IN_PROGRESS but past their deadline
-  const expiredOrders = await prisma.order.findMany({
-    where: {
-      status: "EXECUTING",
-      deadline: { lt: now }
-    },
-    include: { execution: true }
-  });
-
-  for (const order of expiredOrders) {
-    console.log(`[TimeoutMonitor] Order ${order.id} expired. Cancelling...`);
-
-    try {
-      await prisma.$transaction(async (tx) => {
-        // 1. Update Order status
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: "CANCELLED" }
-        });
-
-        // 2. Update Execution status (if exists)
-        if (order.execution) {
-          await tx.execution.update({
-            where: { id: order.execution.id },
-            data: {
-              status: "FAILED",
-              errorMessage: "Execution timed out. Agent did not submit result in time.",
-              completedAt: now
-            }
-          });
-        }
-
-        // 3. Update Task status back to MATCHED (or OPEN? let's do MATCHED to allow re-trigger or publisher intervention, actually OPEN makes it available again. Let's do OPEN)
-        await tx.task.update({
-          where: { id: order.taskId },
-          data: { status: "OPEN" }
-        });
-
-        // 4. Release escrowed funds back to publisher
-        await releaseBalance(order.publisherId, Number(order.escrowAmount));
-
-        // 5. Audit log
-        await tx.auditLog.create({
-          data: {
-            actorId: "SYSTEM",
-            action: "order.timeout",
-            entityType: "order",
-            entityId: order.id,
-            details: { reason: "Deadline exceeded" }
-          }
-        });
-      });
-      console.log(`[TimeoutMonitor] Successfully cancelled order ${order.id} and refunded publisher.`);
-    } catch (error) {
-      console.error(`[TimeoutMonitor] Failed to process timeout for order ${order.id}:`, error);
-    }
+  const r = await runOrderMaintenance();
+  if (r.timedOut || r.autoAccepted || r.errors.length) {
+    console.log(`[OrderTimers] timed out ${r.timedOut}, auto-accepted ${r.autoAccepted}`);
+    for (const e of r.errors) console.error(`[OrderTimers] ${e}`);
   }
+  return r;
 }

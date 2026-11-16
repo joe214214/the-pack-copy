@@ -73,8 +73,7 @@ export async function POST(
   // Don't revive a finished execution: a late report_progress (e.g. the agent
   // marks its last step done right after submit_result) must not clobber a
   // terminal status back to RUNNING. Only advance to RUNNING while still active.
-  const isTerminal =
-    execution.status === "COMPLETED" || execution.status === "FAILED";
+  const isTerminal = execution.status !== "PENDING" && execution.status !== "RUNNING";
 
   await prisma.execution.update({
     where: { id: executionId },

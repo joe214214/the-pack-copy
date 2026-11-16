@@ -28,7 +28,7 @@
  */
 import { Command } from "commander";
 import { spawn } from "node:child_process";
-import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -481,6 +481,42 @@ function codexCommand(workDir: string): { cmd: string; args: string[] } {
   return { cmd: CODEX_BIN, args };
 }
 
+// Codex's built-in image_gen always saves to $CODEX_HOME/generated_images/
+// <session>/…, which is OUTSIDE the per-job workDir that finish() deletes. In
+// the sandbox that directory is the bind-mounted ./codex-home, so without this
+// every customer's images would pile up there for good, and the NEXT job's
+// agent — running with full permissions in the same box — could read them.
+// The agent copies what it delivers into its workDir and uploads from there,
+// so nothing in generated_images is needed once the run has exited.
+const codexGeneratedDir = path.join(
+  process.env.CODEX_HOME || path.join(homedir(), ".codex"),
+  "generated_images"
+);
+
+function listCodexGenerated(): Set<string> {
+  try {
+    return new Set(readdirSync(codexGeneratedDir));
+  } catch {
+    return new Set(); // not created yet — nothing generated so far
+  }
+}
+
+// Deletes every entry in generated_images that is not in `keep`. Each run
+// snapshots the directory first and keeps that snapshot, so on bare metal —
+// where this is the owner's real ~/.codex — only what the job itself produced
+// is removed, never images the owner made by hand.
+function removeCodexGenerated(keep: Set<string>): number {
+  let removed = 0;
+  for (const name of listCodexGenerated()) {
+    if (keep.has(name)) continue;
+    try {
+      rmSync(path.join(codexGeneratedDir, name), { recursive: true, force: true });
+      removed++;
+    } catch { /* best effort */ }
+  }
+  return removed;
+}
+
 // How to launch the Google Antigravity CLI (`agy`) for one job. Like Claude it
 // supports headless `-p`, reading the full prompt from stdin, and it has a
 // built-in `image-generator` subagent on the owner's subscription.
@@ -518,6 +554,9 @@ function runAgent(): Promise<number | null> {
     // embeds a path inside it (the usage report).
     const workDir = mkdtempSync(path.join(jobsRoot, "job-"));
     const isWin = process.platform === "win32";
+    // What already sits in Codex's image output dir before this run, so that
+    // finish() can delete exactly what this run added (see removeCodexGenerated).
+    const codexGeneratedBefore = IS_CODEX ? listCodexGenerated() : null;
 
     const bypass = process.env.RUNNER_BYPASS === "1";
     // Owner-approved claude.ai connectors the worker may use, by MCP server name
@@ -606,6 +645,10 @@ function runAgent(): Promise<number | null> {
       clearTimeout(watchdog);
       if (msg) log(msg);
       try { rmSync(workDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      if (codexGeneratedBefore) {
+        const n = removeCodexGenerated(codexGeneratedBefore);
+        if (n > 0) log(`cleared ${n} Codex image output folder(s) from this run`);
+      }
       resolve(code);
     };
 
@@ -729,8 +772,17 @@ log("Leave this running. Assign tasks to this agent on the website — they'll b
 // same wiring per-run via --mcp-config.
 async function start() {
   if (IS_HERMES) await ensureHermesMcp();
-  else if (IS_CODEX) await ensureCodexMcp();
-  else if (IS_ANTIGRAVITY) ensureAntigravityMcp();
+  else if (IS_CODEX) {
+    await ensureCodexMcp();
+    // In the container CODEX_HOME is a disposable copy, so anything left in
+    // generated_images is a previous job's output (from a crash, or from a
+    // runner that predates the per-run cleanup) — wipe it before taking work.
+    // Never on bare metal, where it is the owner's own ~/.codex.
+    if (process.env.RUNNER_BYPASS === "1") {
+      const n = removeCodexGenerated(new Set());
+      if (n > 0) log(`cleared ${n} leftover Codex image output folder(s) from earlier jobs`);
+    }
+  } else if (IS_ANTIGRAVITY) ensureAntigravityMcp();
   else void refreshApprovedConnectors();
   void tick();
   setInterval(() => void tick(), pollMs);

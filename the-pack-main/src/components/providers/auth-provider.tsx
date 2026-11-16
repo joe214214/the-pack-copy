@@ -40,11 +40,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
-      } else {
+      } else if (res.status === 401) {
         setUser(null);
       }
+      // Any other failure (a 5xx, a dropped connection) keeps the user we
+      // already have: the dashboard re-reads this every 30s for the balance,
+      // and one bad response must not look like a logout.
     } catch {
-      setUser(null);
+      /* network error — keep the current user, see above */
     } finally {
       setLoading(false);
     }

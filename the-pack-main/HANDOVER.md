@@ -3678,3 +3678,77 @@ That command is what produced the tool lists in the entry above, and it costs
 - The host's `model = "gpt-5.5"` pin is dead (400 `model_not_found`) and the
   sandbox is unaffected only because `start.sh` copies `auth.json` alone.
 - Antigravity's generator is proven end to end.
+
+---
+
+## 2026-11-16 — Order lifecycle + money ledger unified; three security holes closed
+
+Done on the user's Mac (codex-cli 0.169.0, Docker sandbox with a Codex-only
+image). Decisions taken with the owner: **internal ledger only** for now (top-ups
+are admin credits; Stripe later), **no withdrawals yet**, a cancelled / timed-out
+task is **closed and can be republished**, deliveries **auto-accept after 7 days**.
+
+### Security (all were live on the deployment)
+- `GET /api/agents`, `GET /api/agents/[slug]` and every `include: { agent }` returned
+  **every agent's `apiKey`, unauthenticated**. Fixed globally: `src/lib/prisma.ts`
+  sets `omit: { agent: { apiKey: true } }`; code that needs a key must ask for it.
+  **Rotate all agent keys once this is deployed** — the old ones were public.
+- `PATCH /api/tasks/[id]` (any status from the body), `PATCH /api/orders/[id]`
+  (cancel = refund, accept, dispute) and `POST /api/executions/[orderId]` had **no
+  auth**. `GET /api/orders/[id]` exposed the publisher's balance and the agent key.
+  All now require the right user; middleware still only guards pages.
+
+### The model
+- `src/lib/ledger.ts` is the only code that moves money: balanced legs
+  (`LedgerEntry`, new table), guarded debits (no overdraw under concurrency),
+  `User.balance`/`frozenBalance` are caches updated in the same transaction.
+- `src/lib/orders/lifecycle.ts` is the only code that changes Task / Order /
+  Execution status. One transaction per operation, compare-and-set on status.
+  `openOrder` (assign + claim, price = task budget always), `markDelivered`,
+  `markRevisionRequested`, `acceptOrder` (REVIEW → SETTLED, task COMPLETED),
+  `disputeOrder`, `cancelOrder` (refund, task CANCELLED, exec FAILED/TIMEOUT),
+  `resolveDispute` (pay / refund / split), `buyExtraRevisions` (money now goes INTO
+  escrow and is paid to the agent; it used to vanish), `adjustBalance`,
+  `releaseUnbackedEscrow`, `runOrderMaintenance`, `recomputeAgentStats`.
+- `src/lib/status.ts` is the one definition of status labels and groups
+  (in_progress / awaiting_review / disputed / completed / closed) used by every
+  list, count, filter and badge. `GET /api/orders?status=` takes a group.
+- Removed: legacy `POST /api/orders` (410), the orphan confirm page, `POST
+  /api/executions/[orderId]`, the never-connected BullMQ `queue.ts`/`redis.ts`, and
+  the direct balance writers in `balance.ts`.
+
+### Bugs this fixed (from two code audits)
+Cancelled/timed-out orders could be revived by a late `plan`/`submit` and paid
+twice; settlement and timeout refunds ran outside their transactions; two
+concurrent accepts could double-pay; the Orders page filter sent only the first
+status (Active showed only CREATED, Completed always empty); dashboards only
+counted the publisher side; tasks never reached COMPLETED/CANCELLED; timeouts
+reopened a task nobody could ever take; worker dashboard dropped revisions;
+admin delete left REVISION_REQUESTED escrow frozen; three different "earned"
+figures (now all from Settlement); header balance never refreshed.
+
+### Data changes made to the live DB
+- Schema push (additive only: 2 enums, `ledger_entries`, `orders.delivered_at`).
+- `scripts/ledger-opening-balances.ts --apply` — opening balance per user.
+- `scripts/repair-task-status.ts --apply` — 13 settled tasks set COMPLETED.
+- `scripts/backfill-agent-order-counts.ts --apply` — totalOrders recomputed.
+- Test orders titled `[lifecycle-test] …` (Alex → Codex Worker 1, $2 each).
+- ⚠️ Testing the cron route auto-accepted **three old demo orders** that had sat
+  in REVIEW since July/September (Alex → Marco's Claude 1, $50 each: Marco +$135,
+  platform $15). That is the 7-day rule working, but they were left in REVIEW on
+  purpose for screenshots. The owner decided to keep them settled (not reversed).
+
+### Still open
+- `scripts/reconcile-ledger.ts` reports two **unbacked escrows** (frozen money
+  with no order): alex 420, jordan 50. Release from
+  `/admin/users` → Manage → "Release unbacked escrow" when the owner decides.
+- The **deployed Vercel app still runs the old code against the same database**:
+  anything it does moves money without ledger entries (reconcile will flag it)
+  and still leaks agent keys. Deploy this, set `CRON_SECRET` in Vercel, then
+  rotate agent keys.
+- Vercel Hobby allows one cron per day (`vercel.json`: 04:00 UTC). Locally
+  `npm run worker` runs the same maintenance every minute.
+- `prisma/seed.ts` and `scripts/cleanup-demo-data.ts` still write balances /
+  delete orders directly — fine for a fresh dev DB, never run them on this one.
+- Payment provider (Stripe Checkout → `DEPOSIT` ledger entries) and withdrawals
+  are the next pieces; the ledger already has the `DEPOSIT` kind reserved.

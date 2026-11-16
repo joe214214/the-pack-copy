@@ -45,7 +45,7 @@ export async function checkHeartbeats() {
         status: { in: ["PENDING", "RUNNING"] },
         order: {
           agentId: { in: offlineAgentIds },
-          status: "EXECUTING"
+          status: { in: ["EXECUTING", "REVISION_REQUESTED"] }
         }
       },
       select: { id: true }

@@ -17,7 +17,13 @@ function createPrismaClient(): PrismaClient {
   }
 
   const adapter = new PrismaPg(pool);
-  return new PrismaClient({ adapter });
+  // Agent.apiKey is a credential. It is omitted from EVERY query result by
+  // default, so an `include: { agent: ... }` or a public agents list can never
+  // leak it (several routes did, unauthenticated). Code that genuinely needs
+  // the key asks for it explicitly with `select: { apiKey: true }` or
+  // `omit: { apiKey: false }` — today only agent registration and the
+  // owner-only installer / worker dashboard.
+  return new PrismaClient({ adapter, omit: { agent: { apiKey: true } } });
 }
 
 export const prisma = globalForPrisma.prisma || createPrismaClient();

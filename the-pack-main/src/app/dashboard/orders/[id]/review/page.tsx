@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
+import { OrderStatusBadge } from "@/components/orders/order-status-badge";
 import { downloadFilesAsZip } from "@/lib/zip";
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -163,11 +164,22 @@ function OutputViewer({ file }: { file: { name: string; url: string; size: numbe
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OrderDetail = any; // Note: We expect this to include currentRound, extraRevisions, revisions array, and task.maxRevisions
 
+/** Who is looking at the order and what they may do (from GET /api/orders/[id]). */
+interface OrderViewer {
+  isPublisher: boolean;
+  isAgentOwner: boolean;
+  isAdmin: boolean;
+  can: { cancel: boolean; review: boolean };
+}
+
+const money = (v: unknown) => `$${n(v).toFixed(2)}`;
+
 export default function ReviewPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
   const [order, setOrder] = useState<OrderDetail | null>(null);
+  const [viewer, setViewer] = useState<OrderViewer | null>(null);
   const [loading, setLoading] = useState(true);
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
@@ -183,7 +195,8 @@ export default function ReviewPage() {
       try {
         const res = await fetch(`/api/orders/${id}`);
         const data = await res.json();
-        setOrder(data.order);
+        setOrder(res.ok ? data.order : null);
+        setViewer(res.ok ? data.viewer ?? null : null);
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
     };
@@ -204,7 +217,16 @@ export default function ReviewPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(accepted ? "✓ Delivery accepted! Agent paid." : "⚠ Dispute raised. Admin will review.");
+      if (accepted) {
+        const s = data.settlement as { total?: number; fee?: number; payout?: number } | undefined;
+        toast.success("Delivery accepted. The agent has been paid.", {
+          description: s
+            ? `${money(s.payout)} paid to the agent (${money(s.total)} total, ${money(s.fee)} platform fee).`
+            : undefined,
+        });
+      } else {
+        toast.success("Dispute opened. An admin will review it within 24h; your funds stay in escrow.");
+      }
       router.push(`/dashboard/orders/${id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Submission failed");
@@ -257,12 +279,18 @@ export default function ReviewPage() {
     );
   }
 
-  if (order.status !== "REVIEW") {
+  if (!viewer?.can.review) {
     return (
       <div className="text-center py-16 text-muted-foreground">
         <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-30" />
-        <p className="font-medium">Order is not in review state.</p>
-        <p className="text-sm mt-1">Current status: <strong>{order.status}</strong></p>
+        <p className="font-medium">
+          {order.status !== "REVIEW"
+            ? "There's nothing to review on this order right now."
+            : "Only the publisher can review this delivery."}
+        </p>
+        <div className="text-sm mt-2 flex items-center justify-center gap-2">
+          Current status: <OrderStatusBadge status={order.status} />
+        </div>
         <Button render={<Link href={`/dashboard/orders/${id}`} />} variant="ghost" className="mt-4">
           Back to Order
         </Button>
@@ -294,10 +322,7 @@ export default function ReviewPage() {
       {/* Header */}
       <div>
         <div className="flex items-center gap-2 flex-wrap mb-2">
-          <Badge variant="outline" className="text-amber-400 bg-amber-500/10 border-amber-500/30 gap-1.5">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-            In Review
-          </Badge>
+          <OrderStatusBadge status={order.status} />
           {isOnTime ? (
             <Badge variant="outline" className="text-emerald-400 bg-emerald-500/10 border-emerald-500/30 gap-1">
               <Clock className="h-3 w-3" /> On time
@@ -383,7 +408,7 @@ export default function ReviewPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {order.revisions.map((rev: any, index: number) => (
+                {(order.revisions as { round: number; createdAt: string; feedback: string; autoScore?: number }[]).map((rev, index) => (
                   <div key={index} className="border border-border/50 rounded-lg p-4 bg-muted/20 space-y-3">
                     <div className="flex justify-between items-start">
                       <Badge variant="outline">Round {rev.round}</Badge>
@@ -580,7 +605,7 @@ export default function ReviewPage() {
                       ) : (
                         <CheckCheck className="mr-2 h-4 w-4" />
                       )}
-                      Accept & Pay Agent · ${n(order.price) - (n(order.price) * 0.10)}/deliverable
+                      Accept & Pay Agent · {money(n(order.price) * 0.9)}
                     </Button>
                     {canRequestRevision && (
                       <Button

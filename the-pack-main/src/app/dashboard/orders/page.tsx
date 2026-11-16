@@ -2,52 +2,62 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
-import { OrderCard } from "@/components/orders/order-card";
+import { OrderCard, type OrderCardData } from "@/components/orders/order-card";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, Bot, Plus, Search } from "lucide-react";
+import { ShoppingCart, Bot, Plus, Search, Layers } from "lucide-react";
 import { layout } from "@/lib/design";
 import { CardGridSkeleton } from "@/components/ui/loading-skeletons";
+import { ORDER_GROUPS, ORDER_GROUP_LABELS, type OrderGroup } from "@/lib/status";
 
-type TabId = "publisher" | "agent-owner";
+type ScopeId = "mine" | "publisher" | "agent-owner";
 
-const STATUS_FILTERS = [
-  { label: "All", value: "" },
-  { label: "Active", value: "CREATED,EXECUTING,REVIEW" },
-  { label: "Completed", value: "ACCEPTED,SETTLED" },
-  { label: "Issues", value: "DISPUTED,CANCELLED" },
+const SCOPE_TABS = [
+  { id: "mine" as ScopeId, label: "All", icon: Layers },
+  { id: "publisher" as ScopeId, label: "Published by me", icon: ShoppingCart },
+  { id: "agent-owner" as ScopeId, label: "My agents' work", icon: Bot },
+] as const;
+
+type GroupFilter = "" | OrderGroup;
+
+const GROUP_FILTERS: { value: GroupFilter; label: string }[] = [
+  { value: "", label: "All" },
+  ...(Object.keys(ORDER_GROUPS) as OrderGroup[]).map((g) => ({ value: g, label: ORDER_GROUP_LABELS[g] })),
 ];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Order = any;
+type Counts = Partial<Record<"all" | OrderGroup, number>>;
 
 export default function OrdersPage() {
-  const [tab, setTab] = useState<TabId>("publisher");
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [total, setTotal] = useState(0);
+  const [scope, setScope] = useState<ScopeId>("mine");
+  const [orders, setOrders] = useState<OrderCardData[]>([]);
+  const [counts, setCounts] = useState<Counts>({});
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [group, setGroup] = useState<GroupFilter>("");
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ scope: tab, limit: "30" });
-      if (statusFilter) params.set("status", statusFilter.split(",")[0]);
+      const params = new URLSearchParams({ scope, limit: "30" });
+      if (group) params.set("status", group);
       const res = await fetch(`/api/orders?${params}`, { cache: "no-store" });
       const data = await res.json();
       setOrders(data.orders ?? []);
-      setTotal(data.total ?? 0);
+      setCounts(data.counts ?? {});
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [tab, statusFilter]);
+  }, [scope, group]);
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  const countFor = (value: GroupFilter) => (value ? counts[value] : counts.all) ?? 0;
+  const showPublish = scope !== "agent-owner";
+  const showBrowse = scope !== "publisher";
 
   return (
     <div className="space-y-6">
@@ -59,49 +69,56 @@ export default function OrdersPage() {
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border/60">
-        {(
-          [
-            { id: "publisher" as TabId, label: "As Publisher", icon: ShoppingCart },
-            { id: "agent-owner" as TabId, label: "As Agent Owner", icon: Bot },
-          ] as const
-        ).map(({ id, label, icon: Icon }) => (
+      {/* Scope tabs */}
+      <div className="flex gap-1 border-b border-border/60 overflow-x-auto">
+        {SCOPE_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setTab(id)}
+            onClick={() => setScope(id)}
             className={cn(
-              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
-              tab === id
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap",
+              scope === id
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
             <Icon className="h-4 w-4" />
             {label}
-            {tab === id && total > 0 && (
-              <Badge variant="secondary" className="text-xs">{total}</Badge>
+            {scope === id && (counts.all ?? 0) > 0 && (
+              <Badge variant="secondary" className="text-xs">{counts.all}</Badge>
             )}
           </button>
         ))}
       </div>
 
-      {/* Status filter chips */}
+      {/* Status group chips */}
       <div className="flex flex-wrap gap-2">
-        {STATUS_FILTERS.map((f) => (
-          <button
-            key={f.label}
-            onClick={() => setStatusFilter(f.value)}
-            className={cn(
-              "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
-              statusFilter === f.value
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground"
-            )}
-          >
-            {f.label}
-          </button>
-        ))}
+        {GROUP_FILTERS.map((f) => {
+          const count = countFor(f.value);
+          return (
+            <button
+              key={f.value || "all"}
+              onClick={() => setGroup(f.value)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                group === f.value
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground"
+              )}
+            >
+              {f.label}
+              <span
+                className={cn(
+                  "rounded px-1 tabular-nums",
+                  group === f.value ? "bg-primary/15" : "bg-muted/60",
+                  count === 0 && "opacity-50"
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Orders list */}
@@ -111,45 +128,52 @@ export default function OrdersPage() {
         <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground gap-3">
           <ShoppingCart className="h-10 w-10 text-muted-foreground/30" />
           <div>
-            <p className="font-medium">No orders yet</p>
-            <p className="text-sm mt-1">
-              {tab === "publisher"
-                ? "Publish a task and an agent can take it from here."
-                : "Take an open task and it will show up here."}
-            </p>
-            {/* The action that makes this list fill up, and it differs by
-                side: a publisher creates work, an agent owner claims it. */}
-            <Button
-              size="sm"
-              className="glow-sm mt-2"
-              render={
-                <Link
-                  href={tab === "publisher" ? "/dashboard/tasks/new" : "/dashboard/tasks"}
-                />
-              }
-            >
-              {tab === "publisher" ? (
-                <>
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Publish a task
-                </>
-              ) : (
-                <>
-                  <Search className="mr-1.5 h-3.5 w-3.5" />
-                  Browse open tasks
-                </>
-              )}
-            </Button>
+            {group && (counts.all ?? 0) > 0 ? (
+              <>
+                <p className="font-medium">No {ORDER_GROUP_LABELS[group].toLowerCase()} orders</p>
+                <Button size="sm" variant="ghost" className="mt-2" onClick={() => setGroup("")}>
+                  Show all orders
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">No orders yet</p>
+                <p className="text-sm mt-1">
+                  {scope === "publisher"
+                    ? "Publish a task and an agent can take it from here."
+                    : scope === "agent-owner"
+                    ? "Take an open task and it will show up here."
+                    : "Publish a task, or let one of your agents take an open task."}
+                </p>
+                {/* The action that makes this list fill up, and it differs by
+                    side: a publisher creates work, an agent owner claims it. */}
+                <div className="flex justify-center gap-2 mt-2">
+                  {showPublish && (
+                    <Button size="sm" className="glow-sm" render={<Link href="/dashboard/tasks/new" />}>
+                      <Plus className="mr-1.5 h-3.5 w-3.5" />
+                      Publish a task
+                    </Button>
+                  )}
+                  {showBrowse && (
+                    <Button
+                      size="sm"
+                      variant={showPublish ? "outline" : "default"}
+                      className={showPublish ? undefined : "glow-sm"}
+                      render={<Link href="/dashboard/tasks" />}
+                    >
+                      <Search className="mr-1.5 h-3.5 w-3.5" />
+                      Browse open tasks
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : (
         <div className={layout.gridCards}>
-          {orders.map((order: Order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              viewAs={tab}
-            />
+          {orders.map((order) => (
+            <OrderCard key={order.id} order={order} />
           ))}
         </div>
       )}

@@ -91,6 +91,28 @@ enum CreditTier {
   DIAMOND
 }
 
+// Where a ledger leg's money sits. A user's AVAILABLE sum is their spendable
+// balance; their ESCROW sum is what is frozen for their orders. PLATFORM is the
+// platform's fee revenue. EXTERNAL is the outside world: money entering the
+// system (deposits, admin credits, opening balances) is debited from it.
+enum LedgerAccount {
+  AVAILABLE
+  ESCROW
+  PLATFORM
+  EXTERNAL
+}
+
+enum LedgerKind {
+  OPENING_BALANCE   // one-off: balances that existed before the ledger
+  ADMIN_ADJUSTMENT  // manual credit / debit by an admin, with a reason
+  DEPOSIT           // top-up through a payment provider (reserved for Stripe)
+  ESCROW_HOLD       // publisher available -> publisher escrow, when work starts
+  EXTRA_REVISION    // publisher available -> escrow, buying extra rounds
+  ESCROW_RELEASE    // publisher escrow -> publisher available (cancel, refund)
+  PAYOUT            // publisher escrow -> agent owner available, on settlement
+  PLATFORM_FEE      // publisher escrow -> platform, on settlement
+}
+
 // ============================================================================
 // USER  
 // ============================================================================
@@ -117,6 +139,7 @@ model User {
   raisedDisputes Dispute[]        @relation("DisputeRaiser")
   auditLogs      AuditLog[]       @relation("AuditLogActor")
   uploadedFiles  File[]           @relation("UserUploads")
+  ledgerEntries  LedgerEntry[]    @relation("LedgerUser")
 
   @@map("users")
 }
@@ -253,11 +276,15 @@ model Order {
   currentRound   Int         @default(1) @map("current_round")
   extraRevisions Int         @default(0) @map("extra_revisions")
   deadline       DateTime?
-  
+  // When the latest round was delivered (Order -> REVIEW). The 7-day
+  // auto-accept window is measured from here.
+  deliveredAt    DateTime?   @map("delivered_at")
+
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
   // Relations
+  ledgerEntries  LedgerEntry[] @relation("LedgerOrder")
   task           Task        @relation("TaskOrder", fields: [taskId], references: [id])
   agent          Agent       @relation("OrderAgent", fields: [agentId], references: [id])
   publisher      User        @relation("OrderPublisher", fields: [publisherId], references: [id])
@@ -467,6 +494,36 @@ model Revision {
   feedbackFiles   File[]   @relation("RevisionFeedbackFiles")  // publisher-attached reference files
 
   @@map("revisions")
+}
+
+// ============================================================================
+// LEDGER — every movement of money, as balanced legs
+// ============================================================================
+// One movement = one groupId; its legs' amounts sum to exactly 0. A positive
+// amount adds to that account, a negative one takes from it. User.balance and
+// User.frozenBalance are caches of the AVAILABLE / ESCROW sums for that user,
+// written in the same transaction by src/lib/ledger.ts — the only writer.
+// scripts/reconcile-ledger.ts checks the caches against this table.
+
+model LedgerEntry {
+  id        String        @id @default(cuid())
+  groupId   String        @map("group_id")
+  kind      LedgerKind
+  account   LedgerAccount
+  userId    String?       @map("user_id")    // null for PLATFORM / EXTERNAL legs
+  orderId   String?       @map("order_id")
+  amount    Decimal       @db.Decimal(12, 2)
+  memo      String?
+  actorId   String?       @map("actor_id")   // who caused it (user, admin, or null = system)
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  user      User?         @relation("LedgerUser", fields: [userId], references: [id])
+  order     Order?        @relation("LedgerOrder", fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([orderId])
+  @@index([groupId])
+  @@map("ledger_entries")
 }
 
 // ============================================================================

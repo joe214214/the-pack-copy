@@ -32,7 +32,18 @@ interface TimelineEvent {
   time: string | null;
   done: boolean;
   active?: boolean;
+  /** Colours a terminal step: red for a dispute, grey for cancelled/refunded. */
+  tone?: "danger" | "muted";
 }
+
+const TONE_DOT: Record<NonNullable<TimelineEvent["tone"]>, string> = {
+  danger: "border-rose-500 bg-rose-500/15 text-rose-400",
+  muted: "border-slate-500 bg-slate-500/15 text-slate-400",
+};
+const TONE_TEXT: Record<NonNullable<TimelineEvent["tone"]>, string> = {
+  danger: "text-rose-400",
+  muted: "text-slate-300",
+};
 
 function Timeline({ events }: { events: TimelineEvent[] }) {
   return (
@@ -44,7 +55,9 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
             <div
               className={cn(
                 "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 text-sm",
-                e.done
+                e.tone
+                  ? TONE_DOT[e.tone]
+                  : e.done
                   ? "border-primary bg-primary text-primary-foreground"
                   : e.active
                   ? "border-primary text-primary animate-pulse"
@@ -67,7 +80,7 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
             <p
               className={cn(
                 "text-sm font-medium",
-                e.done ? "text-foreground" : e.active ? "text-primary" : "text-muted-foreground/50"
+                e.tone ? TONE_TEXT[e.tone] : e.done ? "text-foreground" : e.active ? "text-primary" : "text-muted-foreground/50"
               )}
             >
               {e.label}
@@ -87,6 +100,23 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OrderDetail = any;
 
+/** Who is looking at the order and what they may do (from GET /api/orders/[id]). */
+interface OrderViewer {
+  isPublisher: boolean;
+  isAgentOwner: boolean;
+  isAdmin: boolean;
+  can: { cancel: boolean; review: boolean };
+}
+
+/** Orders auto-accept this long after delivery if the publisher does not respond. */
+const AUTO_ACCEPT_MS = 7 * 24 * 60 * 60 * 1000;
+
+const ACTION_SUCCESS: Record<string, string> = {
+  cancel: "Order cancelled. The full amount has been refunded to you.",
+  accept: "Delivery accepted. The agent has been paid.",
+  dispute: "Dispute opened. An admin will review it.",
+};
+
 /**
  * One row of revision history. `previousFiles` is the snapshot of what that
  * round delivered, taken when the publisher asked for changes — each new round
@@ -104,6 +134,7 @@ interface RevisionEntry {
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [order, setOrder] = useState<OrderDetail | null>(null);
+  const [viewer, setViewer] = useState<OrderViewer | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
 
@@ -111,7 +142,8 @@ export default function OrderDetailPage() {
     try {
       const res = await fetch(`/api/orders/${id}`);
       const data = await res.json();
-      setOrder(data.order);
+      setOrder(res.ok ? data.order : null);
+      setViewer(res.ok ? data.viewer ?? null : null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -132,7 +164,8 @@ export default function OrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.status]);
 
-  const handleAction = async (action: string) => {
+  const handleAction = async (action: "cancel" | "accept" | "dispute") => {
+    if (action === "cancel" && !confirm("Cancel this order? The full amount is refunded to you.")) return;
     setActing(true);
     try {
       const res = await fetch(`/api/orders/${id}`, {
@@ -142,26 +175,10 @@ export default function OrderDetailPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`Order ${action}ed successfully`);
+      toast.success(ACTION_SUCCESS[action]);
       await fetchOrder();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Action failed");
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const handleTriggerExecution = async () => {
-    setActing(true);
-    try {
-      const res = await fetch(`/api/executions/${id}`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Execution started! Agent is working...");
-      // Refresh every 3s to show progress
-      setTimeout(fetchOrder, 3000);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to start execution");
     } finally {
       setActing(false);
     }
@@ -195,69 +212,85 @@ export default function OrderDetailPage() {
   const fmt = (d: string | null) =>
     d ? new Date(d).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
 
-  // Build timeline
-  const statusOrder = ["CREATED", "EXECUTING", "REVIEW", "ACCEPTED", "SETTLED"];
-  const currentIdx = statusOrder.indexOf(order.status);
+  // Build timeline. Driven by what actually happened (timestamps, revisions)
+  // rather than an index into a linear status list, so revision loops,
+  // disputes, cancellations and refunds all render sensibly.
+  const status: string = order.status;
+  const revisions: RevisionEntry[] = order.revisions ?? [];
+  const isClosed = status === "CANCELLED" || status === "REFUNDED";
+  const started =
+    !!order.execution?.startedAt || !["CREATED", "FUNDED", "CANCELLED", "REFUNDED"].includes(status);
+  const delivered =
+    !!order.deliveredAt ||
+    revisions.length > 0 ||
+    ["REVIEW", "REVISION_REQUESTED", "ACCEPTED", "DISPUTED", "SETTLED"].includes(status);
+  const completed = status === "SETTLED" || status === "ACCEPTED";
+  const deliveredAt: string | null = order.deliveredAt ?? order.execution?.completedAt ?? null;
+  const autoAcceptAt = order.deliveredAt
+    ? new Date(new Date(order.deliveredAt).getTime() + AUTO_ACCEPT_MS)
+    : null;
 
-  const timeline: TimelineEvent[] = [
+  let timeline: TimelineEvent[] = [
     {
       icon: <ShoppingCart className="h-3.5 w-3.5" />,
-      label: "Order Placed",
+      label: "Order placed",
       time: fmt(order.createdAt),
       done: true,
     },
     {
       icon: <Play className="h-3.5 w-3.5" />,
-      label: "Execution Started",
+      label: "Started",
       time: fmt(order.execution?.startedAt ?? null),
-      done: currentIdx >= 1,
-      active: order.status === "EXECUTING",
+      done: started,
+      active: status === "EXECUTING" && order.currentRound <= 1,
     },
     {
       icon: <Timer className="h-3.5 w-3.5" />,
-      label: "In Review",
-      time: fmt(order.execution?.completedAt ?? null),
-      done: currentIdx >= 2,
-      active: order.status === "REVIEW",
-    },
-    {
-      icon: <CheckCheck className="h-3.5 w-3.5" />,
-      label: "Accepted",
-      time: order.status === "ACCEPTED" || order.status === "SETTLED" ? fmt(order.updatedAt) : null,
-      done: currentIdx >= 3,
-    },
-    {
-      icon: <Trophy className="h-3.5 w-3.5" />,
-      label: "Settled",
-      time: fmt(order.settlement?.settledAt ?? null),
-      done: order.status === "SETTLED",
+      label: status === "REVIEW" ? "Delivered — awaiting review" : "Delivered",
+      time: fmt(deliveredAt),
+      done: delivered,
+      active: status === "REVIEW",
     },
   ];
-
-  // Override for cancelled/disputed
-  if (order.status === "CANCELLED") {
-    timeline.push({
-      icon: <XCircle className="h-3.5 w-3.5" />,
-      label: "Order Cancelled",
-      time: fmt(order.updatedAt),
-      done: true,
-    });
-  }
-  if (order.status === "DISPUTED") {
-    timeline.push({
-      icon: <AlertTriangle className="h-3.5 w-3.5" />,
-      label: "Dispute Raised",
-      time: fmt(order.updatedAt),
-      done: true,
-    });
-  }
-  if (order.status === "REVISION_REQUESTED") {
+  if (status === "REVISION_REQUESTED" || (status === "EXECUTING" && order.currentRound > 1)) {
     timeline.push({
       icon: <RotateCcw className="h-3.5 w-3.5" />,
-      label: `Revision Requested (Round ${order.currentRound})`,
+      label: `Revising (round ${order.currentRound})`,
+      time: fmt(revisions[revisions.length - 1]?.createdAt ?? order.updatedAt),
+      done: false,
+      active: true,
+    });
+  }
+
+  if (status === "DISPUTED") {
+    timeline.push({
+      icon: <AlertTriangle className="h-3.5 w-3.5" />,
+      label: "Disputed — an admin will decide",
+      time: fmt(
+        ((order.disputes ?? []) as { createdAt: string }[])
+          .map((d) => d.createdAt)
+          .sort()
+          .at(-1) ?? order.updatedAt
+      ),
+      done: true,
+      tone: "danger",
+    });
+  } else if (isClosed) {
+    // Only show what happened before it stopped, then the terminal step.
+    timeline = timeline.filter((e) => e.done);
+    timeline.push({
+      icon: <XCircle className="h-3.5 w-3.5" />,
+      label: status === "REFUNDED" ? "Refunded" : "Cancelled",
       time: fmt(order.updatedAt),
       done: true,
-      active: true,
+      tone: "muted",
+    });
+  } else {
+    timeline.push({
+      icon: <Trophy className="h-3.5 w-3.5" />,
+      label: "Completed",
+      time: fmt(order.settlement?.settledAt ?? (completed ? order.updatedAt : null)),
+      done: completed,
     });
   }
 
@@ -293,18 +326,31 @@ export default function OrderDetailPage() {
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-2 flex-wrap">
-          {order.status === "CREATED" && !order.execution && (
-            <>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
+            {status === "EXECUTING" && (
+              <div className="flex items-center gap-2 text-sm text-violet-400 animate-pulse">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {order.currentRound > 1 ? `Agent is revising (round ${order.currentRound})…` : "Agent is working…"}
+              </div>
+            )}
+            {status === "REVISION_REQUESTED" && (
+              <div className="flex items-center gap-2 text-sm text-orange-400 animate-pulse">
+                <RotateCcw className="h-4 w-4" />
+                Revision requested — waiting for the agent (round {order.currentRound})
+              </div>
+            )}
+            {viewer?.can.review && (
               <Button
                 size="sm"
-                onClick={handleTriggerExecution}
-                disabled={acting}
+                render={<Link href={`/dashboard/orders/${id}/review`} />}
                 className="glow-sm"
               >
-                {acting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Play className="h-4 w-4 mr-1" />}
-                Start Execution
+                <CheckCheck className="h-4 w-4 mr-1" />
+                Review Delivery
               </Button>
+            )}
+            {viewer?.can.cancel && (
               <Button
                 variant="outline"
                 size="sm"
@@ -312,26 +358,17 @@ export default function OrderDetailPage() {
                 disabled={acting}
                 className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
               >
-                <XCircle className="h-4 w-4 mr-1" />
-                Cancel
+                {acting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <XCircle className="h-4 w-4 mr-1" />}
+                Cancel order
               </Button>
-            </>
-          )}
-          {order.status === "EXECUTING" && (
-            <div className="flex items-center gap-2 text-sm text-violet-400 animate-pulse">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Agent is executing...
-            </div>
-          )}
-          {order.status === "REVIEW" && (
-            <Button
-              size="sm"
-              render={<Link href={`/dashboard/orders/${id}/review`} />}
-              className="glow-sm"
-            >
-              <CheckCheck className="h-4 w-4 mr-1" />
-              Review Delivery
-            </Button>
+            )}
+          </div>
+          {status === "REVIEW" && !viewer?.can.review && viewer?.isAgentOwner && (
+            <p className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3.5 w-3.5 shrink-0" />
+              Waiting for the publisher&apos;s review
+              {autoAcceptAt && <> — auto-accepts on {autoAcceptAt.toLocaleDateString(undefined, { dateStyle: "medium" })}</>}
+            </p>
           )}
         </div>
       </div>
@@ -695,7 +732,7 @@ export default function OrderDetailPage() {
           )}
 
           {/* Buy Extra Rounds */}
-          {order.status === "REVIEW" &&
+          {viewer?.isPublisher && status === "REVIEW" &&
             order.currentRound > (order.task?.maxRevisions ?? 3) + (order.extraRevisions ?? 0) && (
               <Card className="border-orange-500/30">
                 <CardContent className="pt-4 space-y-2">

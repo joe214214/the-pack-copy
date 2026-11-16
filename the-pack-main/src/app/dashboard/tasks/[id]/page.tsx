@@ -6,7 +6,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/auth-provider";
-import { Badge } from "@/components/ui/badge";
+import { TaskStatusBadge } from "@/components/orders/order-status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { AgentCard } from "@/components/agents/agent-card";
 import { getTaskType } from "@/lib/task-types";
+import { OPEN_ORDER_STATUSES, taskStatusMeta } from "@/lib/status";
 import {
   Clock,
   DollarSign,
@@ -27,6 +28,10 @@ import {
   Calendar,
   Bot,
   Zap,
+  CheckCircle2,
+  XCircle,
+  Undo2,
+  RotateCcw,
 } from "lucide-react";
 
 interface Task {
@@ -47,19 +52,16 @@ interface Task {
   order?: {
     id: string;
     status: string;
-    agent?: { id: string; name: string; slug: string } | null;
+    agent?: {
+      id: string;
+      name: string;
+      slug: string;
+      avgRating?: number | null;
+      creditTier?: string | null;
+      ownerId?: string;
+    } | null;
   } | null;
 }
-
-const statusStyles: Record<string, { label: string; className: string }> = {
-  DRAFT: { label: "Draft", className: "text-slate-400 bg-slate-500/10 border-slate-500/30" },
-  OPEN: { label: "Open", className: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-  MATCHED: { label: "Matched", className: "text-blue-400 bg-blue-500/10 border-blue-500/30" },
-  EXECUTING: { label: "Executing", className: "text-violet-400 bg-violet-500/10 border-violet-500/30" },
-  REVIEW: { label: "In Review", className: "text-amber-400 bg-amber-500/10 border-amber-500/30" },
-  ACCEPTED: { label: "Accepted", className: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-  SETTLED: { label: "Settled", className: "text-slate-400 bg-slate-500/10 border-slate-500/30" },
-};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MyAgent = any;
@@ -77,6 +79,8 @@ export default function TaskDetailPage() {
   const [myAgents, setMyAgents] = useState<MyAgent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [assigning, setAssigning] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [republishing, setRepublishing] = useState(false);
 
   useEffect(() => {
     const fetchTask = async () => {
@@ -133,6 +137,48 @@ export default function TaskDetailPage() {
     }
   };
 
+  /** Re-reads the task after a publisher action changed it. */
+  const refreshTask = async () => {
+    const res = await fetch(`/api/tasks/${id}`, { cache: "no-store" });
+    if (res.ok) setTask((await res.json()).task);
+  };
+
+  const handleWithdraw = async () => {
+    if (!task) return;
+    if (!confirm("Withdraw this task? Nobody will be able to take it. You can republish it later.")) return;
+    setWithdrawing(true);
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to withdraw task");
+      toast.success("Task withdrawn.");
+      await refreshTask();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to withdraw task");
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  const handleRepublish = async () => {
+    if (!task) return;
+    setRepublishing(true);
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/republish`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.task?.id) throw new Error(data.error ?? "Failed to republish task");
+      toast.success("Task republished. Agents can take it again.");
+      router.push(`/dashboard/tasks/${data.task.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to republish task");
+      setRepublishing(false);
+    }
+  };
+
   // Default the agent picker to the first eligible agent once data loads
   useEffect(() => {
     if (!task || myAgents.length === 0) return;
@@ -164,11 +210,16 @@ export default function TaskDetailPage() {
   }
 
   const meta = getTaskType(task.type);
-  const status = statusStyles[task.status] ?? { label: task.status, className: "" };
+  const statusLabel = taskStatusMeta(task.status).label;
   const budget = Number(task.budget ?? 0);
   const deadlineHours = Number(task.deadlineHours ?? 0);
   const isPublisher = !!user && task.publisher?.id === user.id;
   const payout = budget * 0.9;
+  const order = task.order ?? null;
+  const orderOpen = !!order && OPEN_ORDER_STATUSES.includes(order.status as (typeof OPEN_ORDER_STATUSES)[number]);
+  // A finished order either paid out (SETTLED / legacy ACCEPTED) or was
+  // stopped with the publisher refunded (CANCELLED / REFUNDED).
+  const orderCompleted = !!order && (order.status === "SETTLED" || order.status === "ACCEPTED");
   const eligibleAgents = myAgents.filter(
     (a) => a.status === "ACTIVE" && (a.supportedTaskTypes ?? []).includes(task.type)
   );
@@ -190,12 +241,7 @@ export default function TaskDetailPage() {
                 <meta.icon className={cn("h-5 w-5", meta.color)} />
               </div>
             )}
-            <Badge
-              variant="outline"
-              className={cn("text-xs", status.className)}
-            >
-              {status.label}
-            </Badge>
+            <TaskStatusBadge status={task.status} />
             {meta && (
               <span className={cn("text-sm font-medium", meta.color)}>
                 {meta.label}
@@ -290,7 +336,7 @@ export default function TaskDetailPage() {
         <div className="space-y-4">
           {/* Task already has an order → the work (live progress, delivered
               files, review) lives on the ORDER page. Give it a loud entrance. */}
-          {task.order && (
+          {order && orderOpen && (
             <Card className="border-primary/30 bg-primary/5">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -298,8 +344,8 @@ export default function TaskDetailPage() {
                   Work in progress
                 </CardTitle>
                 <CardDescription>
-                  {task.order.agent?.name
-                    ? `Agent "${task.order.agent.name}" is on it.`
+                  {order.agent?.name
+                    ? `Agent "${order.agent.name}" is on it.`
                     : "An agent is on it."}{" "}
                   Live progress and delivered files are on the order page.
                 </CardDescription>
@@ -307,7 +353,7 @@ export default function TaskDetailPage() {
               <CardContent>
                 <Button
                   className="w-full glow-sm"
-                  render={<Link href={`/dashboard/orders/${task.order.id}`} />}
+                  render={<Link href={`/dashboard/orders/${order.id}`} />}
                 >
                   View order & deliverables
                 </Button>
@@ -315,15 +361,86 @@ export default function TaskDetailPage() {
             </Card>
           )}
 
-          {task.status === "OPEN" && isPublisher && (
+          {order && !orderOpen && (
             <Card className="border-border/60">
-              <CardContent className="py-4 text-sm text-muted-foreground">
-                This is your task. A worker will take it with one of their agents and start working — you&apos;ll see live progress on the order page once they do.
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  {orderCompleted ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  {orderCompleted ? "Completed" : "Cancelled"}
+                </CardTitle>
+                <CardDescription>
+                  {orderCompleted
+                    ? `${order.agent?.name ? `Agent "${order.agent.name}"` : "The agent"} delivered this task and the order is settled.`
+                    : "The order for this task was cancelled and the budget refunded to the publisher."}{" "}
+                  The full history is on the order page.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  render={<Link href={`/dashboard/orders/${order.id}`} />}
+                >
+                  View order
+                </Button>
               </CardContent>
             </Card>
           )}
 
-          {task.status === "OPEN" && !isPublisher && eligibleAgents.length > 0 && (
+          {task.status === "OPEN" && isPublisher && (
+            <Card className="border-border/60">
+              <CardContent className="space-y-3 py-4 text-sm text-muted-foreground">
+                <p>
+                  This is your task. A worker will take it with one of their agents and start working — you&apos;ll see live progress on the order page once they do.
+                </p>
+                {!order && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleWithdraw}
+                    disabled={withdrawing}
+                  >
+                    {withdrawing ? (
+                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <Undo2 className="h-4 w-4 mr-1.5" />
+                    )}
+                    Withdraw task
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {task.status === "CANCELLED" && isPublisher && (
+            <Card className="border-border/60">
+              <CardContent className="space-y-3 py-4 text-sm text-muted-foreground">
+                <p>
+                  This task is <span className="font-medium text-foreground">cancelled</span>. Republish it to post a fresh copy agents can take.
+                </p>
+                <Button
+                  size="sm"
+                  className="w-full"
+                  onClick={handleRepublish}
+                  disabled={republishing}
+                >
+                  {republishing ? (
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4 mr-1.5" />
+                  )}
+                  Republish
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {task.status === "OPEN" && !order && !isPublisher && eligibleAgents.length > 0 && (
             <Card className="border-primary/30 bg-primary/5">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -370,7 +487,7 @@ export default function TaskDetailPage() {
             </Card>
           )}
 
-          {task.status === "OPEN" && !isPublisher && eligibleAgents.length === 0 && (
+          {task.status === "OPEN" && !order && !isPublisher && eligibleAgents.length === 0 && (
             <Card className="border-border/60">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -393,10 +510,10 @@ export default function TaskDetailPage() {
             </Card>
           )}
 
-          {task.status !== "OPEN" && (
+          {task.status !== "OPEN" && !isPublisher && (
             <Card className="border-border/60">
               <CardContent className="py-4 text-sm text-muted-foreground">
-                This task is <span className="font-medium text-foreground">{status.label}</span> and can no longer be taken.
+                This task is <span className="font-medium text-foreground">{statusLabel.toLowerCase()}</span> and can no longer be taken.
               </CardContent>
             </Card>
           )}

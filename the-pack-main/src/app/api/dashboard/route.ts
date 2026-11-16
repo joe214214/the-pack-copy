@@ -13,16 +13,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
-
-/** Orders that are still in flight — not finished, not called off. */
-const OPEN_ORDER_STATUSES = [
-  "CREATED",
-  "FUNDED",
-  "EXECUTING",
-  "REVIEW",
-  "REVISION_REQUESTED",
-  "DISPUTED",
-] as const;
+import { OPEN_ORDER_STATUSES, ORDER_GROUPS } from "@/lib/status";
 
 /** Tasks that are live — published and not yet finished or withdrawn. */
 const ACTIVE_TASK_STATUSES = ["OPEN", "MATCHED", "IN_PROGRESS"] as const;
@@ -51,8 +42,10 @@ export async function GET() {
     newTasksThisWeek,
     availableAgents,
     newAgentsThisWeek,
-    openOrders,
+    openAsPublisher,
+    openAsAgentOwner,
     ordersInReview,
+    myAgentsWorking,
     myAgentIds,
     recentOrders,
     completedToday,
@@ -71,21 +64,26 @@ export async function GET() {
     prisma.agent.count({
       where: { status: "ACTIVE", createdAt: { gte: weekAgo } },
     }),
+    // Both sides of the marketplace: orders I published, and orders my agents
+    // are working on. An agent owner who dispatches work used to see 0 here.
     prisma.order.count({
-      where: {
-        publisherId: user.id,
-        status: { in: [...OPEN_ORDER_STATUSES] },
-      },
+      where: { publisherId: user.id, status: { in: OPEN_ORDER_STATUSES } },
+    }),
+    prisma.order.count({
+      where: { agent: { ownerId: user.id }, status: { in: OPEN_ORDER_STATUSES } },
     }),
     prisma.order.count({
       where: { publisherId: user.id, status: "REVIEW" },
+    }),
+    prisma.order.count({
+      where: { agent: { ownerId: user.id }, status: { in: [...ORDER_GROUPS.in_progress] } },
     }),
     prisma.agent.findMany({
       where: { ownerId: user.id },
       select: { id: true },
     }),
     prisma.order.findMany({
-      where: { publisherId: user.id },
+      where: { OR: [{ publisherId: user.id }, { agent: { ownerId: user.id } }] },
       orderBy: { createdAt: "desc" },
       take: 4,
       select: {
@@ -93,16 +91,12 @@ export async function GET() {
         status: true,
         price: true,
         createdAt: true,
+        publisherId: true,
         task: { select: { title: true } },
-        agent: { select: { name: true } },
+        agent: { select: { name: true, ownerId: true } },
       },
     }),
-    prisma.order.count({
-      where: {
-        status: { in: ["ACCEPTED", "SETTLED"] },
-        updatedAt: { gte: startOfToday },
-      },
-    }),
+    prisma.settlement.count({ where: { settledAt: { gte: startOfToday } } }),
     prisma.agent.count({
       where: { status: "ACTIVE", lastHeartbeat: { gte: heartbeatCutoff } },
     }),
@@ -120,20 +114,16 @@ export async function GET() {
     prisma.review.count({ where: { userAccepted: { not: null } } }),
   ]);
 
-  // Money in and out, computed rather than stored, so it cannot drift.
+  // Money in and out. Settlement rows are the one source for both, on every
+  // page (dashboard, worker dashboard, wallet), so the figures always agree.
   const [earnedAgg, spentAgg] = await Promise.all([
-    myAgentIds.length > 0
-      ? prisma.settlement.aggregate({
-          _sum: { agentPayout: true },
-          where: { order: { agentId: { in: myAgentIds.map((a) => a.id) } } },
-        })
-      : Promise.resolve({ _sum: { agentPayout: null } }),
-    prisma.order.aggregate({
-      _sum: { price: true },
-      where: {
-        publisherId: user.id,
-        status: { in: ["ACCEPTED", "SETTLED"] },
-      },
+    prisma.settlement.aggregate({
+      _sum: { agentPayout: true },
+      where: { status: "COMPLETED", order: { agent: { ownerId: user.id } } },
+    }),
+    prisma.settlement.aggregate({
+      _sum: { totalAmount: true },
+      where: { status: "COMPLETED", order: { publisherId: user.id } },
     }),
   ]);
 
@@ -152,13 +142,16 @@ export async function GET() {
       newTasksThisWeek,
       availableAgents,
       newAgentsThisWeek,
-      openOrders,
+      openOrders: openAsPublisher + openAsAgentOwner,
+      openAsPublisher,
+      openAsAgentOwner,
       ordersInReview,
+      myAgentsWorking,
       // An account that owns no agent can never earn, so showing it "Total
       // Earned $0" forever is noise. Those users get what they have spent.
       ownsAgents: myAgentIds.length > 0,
       totalEarned: n(earnedAgg._sum.agentPayout),
-      totalSpent: n(spentAgg._sum.price),
+      totalSpent: n(spentAgg._sum.totalAmount),
     },
     recentOrders: recentOrders.map((o) => ({
       id: o.id,
@@ -166,6 +159,7 @@ export async function GET() {
       agent: o.agent?.name ?? "Unassigned",
       status: o.status,
       amount: n(o.price),
+      side: o.publisherId === user.id ? "publisher" : "agent-owner",
       createdAt: o.createdAt.toISOString(),
     })),
     platform: {

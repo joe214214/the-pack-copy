@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { orderStatusMeta } from "@/lib/status";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,15 +15,12 @@ import {
 
 const n = (v: unknown) => Number(v ?? 0);
 
-// ─── Status color map ─────────────────────────────────────────────────────────
-const STATUS_COLORS: Record<string, string> = {
-  CREATED:   "text-blue-400 bg-blue-500/10 border-blue-500/30",
-  EXECUTING: "text-violet-400 bg-violet-500/10 border-violet-500/30",
-  REVIEW:    "text-amber-400 bg-amber-500/10 border-amber-500/30",
-  ACCEPTED:  "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
-  SETTLED:   "text-slate-400 bg-slate-500/10 border-slate-500/30",
-  CANCELLED: "text-rose-400 bg-rose-500/10 border-rose-500/30",
-  DISPUTED:  "text-orange-400 bg-orange-500/10 border-orange-500/30",
+// ─── Status colours ───────────────────────────────────────────────────────────
+// From src/lib/status.ts, so every order status (REVISION_REQUESTED, FUNDED,
+// REFUNDED included) is coloured and labelled the same as everywhere else.
+const statusClasses = (status: string) => {
+  const m = orderStatusMeta(status);
+  return cn(m.color, m.bg, m.border);
 };
 
 // ─── Big Stat Card ────────────────────────────────────────────────────────────
@@ -54,8 +52,8 @@ function BigStat({
 function StatusPill({ status, count }: { status: string; count: number }) {
   return (
     <div className="flex items-center justify-between py-1.5">
-      <Badge variant="outline" className={cn("text-xs", STATUS_COLORS[status] ?? "text-muted-foreground")}>
-        {status}
+      <Badge variant="outline" className={cn("text-xs", statusClasses(status))} title={status}>
+        {orderStatusMeta(status).label}
       </Badge>
       <span className="text-sm font-semibold">{count}</span>
     </div>
@@ -175,8 +173,12 @@ export default function AdminPage() {
                         {new Date(order.createdAt).toLocaleDateString()}
                       </p>
                     </div>
-                    <Badge variant="outline" className={cn("text-xs shrink-0", STATUS_COLORS[order.status] ?? "")}>
-                      {order.status}
+                    <Badge
+                      variant="outline"
+                      className={cn("text-xs shrink-0", statusClasses(order.status))}
+                      title={order.status}
+                    >
+                      {orderStatusMeta(order.status).label}
                     </Badge>
                     <Button
                       variant="ghost"
