@@ -23,11 +23,22 @@
  *
  * SETTLED, REFUNDED and CANCELLED are terminal. ACCEPTED is no longer written
  * (accepting settles immediately); it is still read for legacy rows.
+ *
+ * Capability tests (Task.isQualification) use the same rows but never touch
+ * the ledger, credit records or agent stats, and have their own transitions:
+ *
+ *   openQualification                      -> EXECUTING     task IN_PROGRESS, exec PENDING, price 0
+ *   finishQualification EXECUTING          -> SETTLED (passed) | CANCELLED (failed)
+ *                                                           exec COMPLETED; on pass the type moves
+ *                                                           from agent.pendingTaskTypes to supportedTaskTypes
+ *   expireQualification EXECUTING          -> CANCELLED     exec TIMEOUT (run by runOrderMaintenance)
  */
 import { prisma } from "@/lib/prisma";
-import type { OrderStatus, TaskStatus } from "@/generated/prisma/enums";
+import type { OrderStatus, TaskStatus, TaskType } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 import { holdEscrow, releaseEscrow, payOut, adminAdjust, post, splitFee, toCents, type Tx } from "@/lib/ledger";
 import { calculateFees } from "@/lib/fees";
+import { getFileUrl } from "@/lib/storage";
 import { deriveCreditTier } from "@/lib/credit-tiers";
 
 export class LifecycleError extends Error {
@@ -78,11 +89,12 @@ async function loadOrder(tx: Tx, orderId: string) {
 // ─── Agent stats, recomputed from the source rows (never incremented blindly) ─
 
 export async function recomputeAgentStats(tx: Tx, agentId: string) {
+  const real = { agentId, task: { isQualification: false } };
   const [totalOrders, settled, records, rated] = await Promise.all([
-    tx.order.count({ where: { agentId } }),
-    tx.order.aggregate({ where: { agentId, status: "SETTLED" }, _count: { _all: true }, _avg: { price: true } }),
+    tx.order.count({ where: real }),
+    tx.order.aggregate({ where: { ...real, status: "SETTLED" }, _count: { _all: true }, _avg: { price: true } }),
     tx.creditRecord.findMany({ where: { agentId }, select: { successScore: true, qualityScore: true, ratingScore: true } }),
-    tx.review.aggregate({ where: { order: { agentId }, userRating: { not: null } }, _avg: { userRating: true } }),
+    tx.review.aggregate({ where: { order: real, userRating: { not: null } }, _avg: { userRating: true } }),
   ]);
   const n = records.length;
   const avg = (k: "successScore" | "qualityScore" | "ratingScore") =>
@@ -378,11 +390,14 @@ export async function runOrderMaintenance(now = new Date()) {
 
   const overdue = await prisma.order.findMany({
     where: { status: { in: ["EXECUTING", "REVISION_REQUESTED"] }, deadline: { lt: now } },
-    select: { id: true },
+    select: { id: true, task: { select: { isQualification: true } } },
   });
   for (const o of overdue) {
     try {
-      await cancelOrder({ orderId: o.id, actorId: null, kind: "timeout", reason: "Deadline passed without a delivery" });
+      // A capability test that was never handed in just lapses: no refund to
+      // make and no failure to put on the agent's credit record.
+      if (o.task.isQualification) await expireQualification(o.id);
+      else await cancelOrder({ orderId: o.id, actorId: null, kind: "timeout", reason: "Deadline passed without a delivery" });
       result.timedOut++;
     } catch (e) {
       result.errors.push(`timeout ${o.id}: ${(e as Error).message}`);
@@ -406,6 +421,149 @@ export async function runOrderMaintenance(now = new Date()) {
     }
   }
   return result;
+}
+
+// ─── Capability tests ───────────────────────────────────────────────────────
+
+/** Statuses in which a capability test is still waiting for the agent. */
+const QUALIFICATION_OPEN: OrderStatus[] = ["EXECUTING"];
+
+/**
+ * Issues a capability test to an agent as a free job. `inputFileId`, when
+ * given, is an already-uploaded task-inputs file that becomes the job's input.
+ * Refuses a second open test of the same type for the same agent.
+ */
+export async function openQualification(a: {
+  agentId: string;
+  publisherId: string;
+  type: TaskType;
+  spec: Prisma.InputJsonValue;
+  brief: { title: string; description: string; outputFormat: string };
+  deadlineHours: number;
+  inputFileId?: string;
+  actorId: string | null;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const open = await tx.order.findFirst({
+      where: { agentId: a.agentId, status: { in: QUALIFICATION_OPEN }, task: { isQualification: true, type: a.type } },
+      select: { id: true },
+    });
+    if (open) throw new LifecycleError("A test of this type is already waiting for this agent");
+
+    const task = await tx.task.create({
+      data: {
+        publisherId: a.publisherId,
+        type: a.type,
+        title: a.brief.title,
+        description: a.brief.description,
+        outputFormat: a.brief.outputFormat,
+        budget: 0,
+        deadlineHours: a.deadlineHours,
+        maxRevisions: 0,
+        qualityCriteria: {},
+        inputFiles: [],
+        status: "IN_PROGRESS",
+        isQualification: true,
+        qualificationSpec: a.spec,
+      },
+    });
+    if (a.inputFileId) {
+      const file = await tx.file.update({ where: { id: a.inputFileId }, data: { taskId: task.id } });
+      await tx.task.update({
+        where: { id: task.id },
+        data: {
+          inputFiles: [{ id: file.id, name: file.filename, url: getFileUrl(file.key), size: file.size, type: file.contentType }],
+        },
+      });
+    }
+    const order = await tx.order.create({
+      data: {
+        taskId: task.id,
+        agentId: a.agentId,
+        publisherId: a.publisherId,
+        price: 0,
+        platformFee: 0,
+        escrowAmount: 0,
+        status: "EXECUTING",
+        deadline: new Date(Date.now() + a.deadlineHours * 3600_000),
+      },
+    });
+    const execution = await tx.execution.create({ data: { orderId: order.id, status: "PENDING" } });
+    await audit(tx, a.actorId, "qualification.open", order.id, { agentId: a.agentId, type: a.type });
+    return { taskId: task.id, orderId: order.id, executionId: execution.id };
+  });
+}
+
+/**
+ * Closes a graded capability test. Runs inside the submit route's
+ * transaction, after the outputs and the grading are written. On a pass the
+ * type becomes work the agent can be given.
+ */
+export async function finishQualification(tx: Tx, a: { orderId: string; executionId: string; agentId: string; type: TaskType; passed: boolean }) {
+  const ex = await tx.execution.updateMany({
+    where: { id: a.executionId, status: { in: ["PENDING", "RUNNING"] } },
+    data: { status: "COMPLETED", completedAt: new Date() },
+  });
+  if (ex.count !== 1) throw new LifecycleError("Execution is not accepting submissions");
+  const order = await tx.order.findUniqueOrThrow({ where: { id: a.orderId }, select: { taskId: true } });
+  await moveOrder(tx, a.orderId, QUALIFICATION_OPEN, { status: a.passed ? "SETTLED" : "CANCELLED", deliveredAt: new Date() });
+  await moveTask(tx, order.taskId, a.passed ? "COMPLETED" : "CANCELLED");
+  if (a.passed) await grantTaskType(tx, a.agentId, a.type);
+  await audit(tx, null, a.passed ? "qualification.pass" : "qualification.fail", a.orderId, { agentId: a.agentId, type: a.type });
+}
+
+/** A test nobody handed in before its deadline. */
+export async function expireQualification(orderId: string) {
+  return prisma.$transaction(async (tx) => {
+    const order = await loadOrder(tx, orderId);
+    await moveOrder(tx, order.id, QUALIFICATION_OPEN, { status: "CANCELLED" });
+    if (order.execution) {
+      await tx.execution.updateMany({
+        where: { id: order.execution.id, status: { in: ["PENDING", "RUNNING"] } },
+        data: { status: "TIMEOUT", errorMessage: "The test was not handed in before its deadline", completedAt: new Date() },
+      });
+    }
+    await moveTask(tx, order.taskId, "CANCELLED");
+    await audit(tx, null, "qualification.expire", order.id, { agentId: order.agentId });
+  });
+}
+
+async function grantTaskType(tx: Tx, agentId: string, type: TaskType) {
+  const agent = await tx.agent.findUniqueOrThrow({
+    where: { id: agentId },
+    select: { supportedTaskTypes: true, acceptTaskTypes: true, pendingTaskTypes: true },
+  });
+  const add = (xs: TaskType[]) => (xs.includes(type) ? xs : [...xs, type]);
+  await tx.agent.update({
+    where: { id: agentId },
+    data: {
+      supportedTaskTypes: add(agent.supportedTaskTypes),
+      acceptTaskTypes: add(agent.acceptTaskTypes),
+      pendingTaskTypes: agent.pendingTaskTypes.filter((t) => t !== type),
+    },
+  });
+}
+
+/** Admin takes a type back (e.g. a test image turned out to be a stock photo). */
+export async function revokeTaskType(a: { agentId: string; type: TaskType; adminId: string; reason: string }) {
+  return prisma.$transaction(async (tx) => {
+    const agent = await tx.agent.findUniqueOrThrow({
+      where: { id: a.agentId },
+      select: { supportedTaskTypes: true, acceptTaskTypes: true, pendingTaskTypes: true },
+    });
+    if (!agent.supportedTaskTypes.includes(a.type)) throw new LifecycleError("The agent does not have this type");
+    await tx.agent.update({
+      where: { id: a.agentId },
+      data: {
+        supportedTaskTypes: agent.supportedTaskTypes.filter((t) => t !== a.type),
+        acceptTaskTypes: agent.acceptTaskTypes.filter((t) => t !== a.type),
+        pendingTaskTypes: agent.pendingTaskTypes.includes(a.type) ? agent.pendingTaskTypes : [...agent.pendingTaskTypes, a.type],
+      },
+    });
+    await tx.auditLog.create({
+      data: { actorId: a.adminId, action: "qualification.revoke", entityType: "agent", entityId: a.agentId, details: { type: a.type, reason: a.reason } },
+    });
+  });
 }
 
 export { splitFee };

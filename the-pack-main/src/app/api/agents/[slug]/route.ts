@@ -18,7 +18,7 @@ export async function GET(
             include: {
               owner: { select: { id: true, name: true } },
               orders: {
-                where: { status: { in: ["SETTLED", "ACCEPTED"] } },
+                where: { status: { in: ["SETTLED", "ACCEPTED"] }, task: { isQualification: false } },
                 include: {
                   review: { select: { userRating: true, userComment: true, autoPassed: true, autoScore: true } },
                   task: { select: { type: true, title: true } },
@@ -35,7 +35,7 @@ export async function GET(
             include: {
               owner: { select: { id: true, name: true } },
               orders: {
-                where: { status: { in: ["SETTLED", "ACCEPTED"] } },
+                where: { status: { in: ["SETTLED", "ACCEPTED"] }, task: { isQualification: false } },
                 include: {
                   review: { select: { userRating: true, userComment: true, autoPassed: true, autoScore: true } },
                   task: { select: { type: true, title: true } },

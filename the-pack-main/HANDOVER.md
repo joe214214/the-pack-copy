@@ -3841,4 +3841,108 @@ Housekeeping: `.next/dev/types` was stale (still referenced the
 server regenerates it. Added `.claude/launch.json` (repo root) for the preview
 server.
 
+### State: committed as `73d4872`, pushed to `mycopy/main`, deployed and verified (401 / 405 on production).
+
+---
+
+## 2026-11-24 (later 2) — Capability tests: image types unlock only after the agent passes a test
+
+### Why
+`supportedTaskTypes` was whatever the owner ticked at registration. A Claude or
+free-Codex agent could tick IMAGE_GENERATION, win an order, find no image tool
+and fall back to Pillow — delivering drawn art as if it were generated (see the
+2026-11-15 entries). Owner decisions: tests are graded by the platform with
+free pixel checks (no API key, no model call; the agent's own opinion does not
+count), **generation and editing are tested and unlocked separately**, and
+**agents registered before this keep what they have**.
+
+### How it works
+- A test is an ordinary job: a `Task` with `isQualification=true` and a
+  `qualificationSpec`, published by a password-less system user
+  (`capability-tests@system.thepack`, created on first use), plus a $0
+  `Order` (EXECUTING) and a PENDING `Execution`. The agent's own runner and
+  brain pick it up from `get_assigned_jobs` like paid work — **no runner, MCP
+  or sandbox change**. Tests never touch the ledger, credit records or agent
+  stats.
+- Registration (`POST /api/agents`): ticked types in `QUALIFIED_TYPES`
+  (IMAGE_GENERATION, IMAGE_EDITING) go to the new `Agent.pendingTaskTypes`;
+  the rest to `supportedTaskTypes` as before; one test per pending type is
+  issued at once. `openOrder`, matching, the marketplace filter and the worker
+  dashboard all read `supportedTaskTypes`, so a pending type gets no work.
+- Submit (`/api/agent-gateway/executions/[id]/submit`): a test is graded on the
+  spot and closed with `finishQualification` — pass → order SETTLED, task
+  COMPLETED, type moves pending → supported; fail → CANCELLED. It never goes to
+  REVIEW. The response tells the agent the result and every check.
+- Expiry: 72 h. `runOrderMaintenance` sends overdue tests to
+  `expireQualification` (no refund, no credit record) instead of `cancelOrder`.
+- `/api/agents/[slug]/qualifications`: GET (owner/admin) tests with images,
+  checks and the agent's note; POST `start` (owner; also lets an existing agent
+  add a tested type later; one waiting test per type) and `revoke` (admin; type
+  goes back to pending, audit row).
+- UI: owner/admin "Capability tests" card on the agent page
+  (`components/agents/capability-tests.tsx`); "test" badge and an explanation on
+  the registration form, and a "waiting on tests" note after registering.
+- Excluded from public lists: agent profile recent orders and both reputation
+  routes filter `task.isQualification = false`; `recomputeAgentStats` too.
+
+### The tests (`src/lib/qualification/`)
+- **Editing**: a random 640×480 source image (gradient + a mosaic of random
+  16 px blocks + shapes + noise) is uploaded as the task input; the brief lists a random chain of
+  exact edits — crop at given pixel coordinates, one of flip H/V / rotate
+  90° cw / 180°, optionally invert or grayscale with the stated BT.601 formula,
+  then a solid border of a given width and colour. The grader recomputes the
+  result on raw RGB (`image.ts`, independent of any library's idea of "flip")
+  and compares: exact size, mean abs diff ≤ 4, ≥ 95% pixels within 12.
+- **Generation**: a random prompt and ≥ 512 px per side. The grader cannot see
+  content; it checks the image is a generated raster, not code-drawn:
+  ≥ 20,000 colours, mean local contrast ≥ 1.5, ≤ 60% pixels equal to their
+  neighbour.
+
+### Calibration (offline, sharp)
+| case | result |
+|---|---|
+| 150 random edit chains, solved independently with sharp → PNG | 150/150 pass, mean diff 0–0.43 |
+| same, wrong answers: every other orientation op, or the colour op left out | 0 of 695 pass |
+| correct but saved as JPEG q92 (12 tried) | 7/12 pass (brief demands PNG) |
+| real generated: golden retriever, coffee shop | pass (148k / 505k colours, contrast 5.3 / 8.4) |
+| code-drawn: flat, gradient poster, 60 overlapping circles, as JPEG | all fail (contrast 0.3–0.7, 81–99% flat) |
+| drawn + noise ±4 or ±12 | **pass** — known gap |
+
+The first source image had no mosaic: on a second 12-trial run one wrong
+answer passed. A crop that misses every shape is a smooth, near-axis gradient,
+and e.g. flip-H vs rotate-180 of that differ only by the faint noise. The
+mosaic makes every region unique; the 150-trial run above is with it. The
+contrast threshold was first 3.5 and lowered to 1.5 so soft generated scenes
+(mist, overcast) are not failed; that is what lets ±4 noise through.
+
+### End to end (local dev server, live DB)
+Registered `[test] Capability test agent` as Marco with writing + both image
+types → writing usable, images pending, two $0 jobs issued. Editing solved by
+parsing the brief text step by step → passed, unlocked. Generation with a
+drawn image → failed with all three reasons; retake → a second retake while
+one waits is 409, retaking an unlocked type is 409; real generated image →
+passed, unlocked. Admin revoke (owner 403, admin can't start 403) → pending
+again; a new test expired via `expireQualification` → "expired". Through all
+of it: totalOrders 0, creditScore 0, 0 credit records, 0 ledger entries,
+nothing on the public profile. The agent was then **SUSPENDED with its key
+cleared** (audit row `agent.suspend`).
+
+### Known limits
+- Generation content is unchecked: the golden retriever passed a "bowl of
+  ramen" prompt, and drawn art with added noise (±4 already) passes. Both are deliberate cheats; the
+  admin sees every test image on the agent page and can revoke.
+- An honest agent with no image tool is told by the brief to say so; it then
+  fails with "No image file was submitted", which is the right result.
+- Agents registered before this keep their image types (owner's choice), so
+  the Pillow-fallback hole is still open for them.
+- Video and other types have no test yet; `QUALIFIED_TYPES` is the switch.
+- File URLs in `outputFiles` are absolute with the writer's
+  `NEXT_PUBLIC_APP_URL` (locally `localhost:3100`). The qualifications API
+  returns them relative; other pages still use the stored absolute URL.
+
+### DB
+`prisma db push` (additive only, reviewed with `migrate diff` first):
+`agents.pending_task_types`, `tasks.is_qualification` (default false),
+`tasks.qualification_spec`. Old deployed code is unaffected by the new columns.
+
 ### State: not committed.

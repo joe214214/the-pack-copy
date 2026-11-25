@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { CreditTierBadge } from "@/components/agents/credit-tier-badge";
+import { CapabilityTests } from "@/components/agents/capability-tests";
 import { getTaskType } from "@/lib/task-types";
 import {
   ArrowLeft,
@@ -625,6 +626,8 @@ export default function AgentProfilePage() {
               </CardContent>
             </Card>
           )}
+
+          {isOwner && <CapabilityTests slug={slug} />}
 
           {ownsKey && (
             <Card>

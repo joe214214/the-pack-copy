@@ -23,7 +23,7 @@ export async function GET() {
           select: { successScore: true, qualityScore: true, timelinessScore: true, ratingScore: true },
         },
         orders: {
-          where: { status: "SETTLED" },
+          where: { status: "SETTLED", task: { isQualification: false } },
           select: {
             id: true,
             task: { select: { title: true } },

@@ -15,7 +15,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { TASK_TYPES } from "@/lib/task-types";
+import { TASK_TYPES, getTaskType } from "@/lib/task-types";
+import { needsQualification } from "@/lib/qualification/spec";
 import {
   Bot,
   ArrowLeft,
@@ -45,7 +46,13 @@ export default function NewAgentPage() {
   const [types, setTypes] = useState<string[]>([]);
   const [platform, setPlatform] = useState<ConnectionType>("MCP");
   const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState<{ apiKey: string; slug: string; name: string; platform: ConnectionType } | null>(null);
+  const [created, setCreated] = useState<{
+    apiKey: string;
+    slug: string;
+    name: string;
+    platform: ConnectionType;
+    pendingTests: string[];
+  } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const toggleType = (id: string) =>
@@ -72,7 +79,13 @@ export default function NewAgentPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to register agent");
       toast.success("Agent registered!");
-      setCreated({ apiKey: data.apiKey, slug: data.agent.slug, name: data.agent.name, platform });
+      setCreated({
+        apiKey: data.apiKey,
+        slug: data.agent.slug,
+        name: data.agent.name,
+        platform,
+        pendingTests: data.capabilityTests?.pending ?? [],
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to register agent");
     } finally {
@@ -159,6 +172,17 @@ node dist/runner.js -k ${created.apiKey} -s http://localhost:3000`}
             <p className="text-xs text-muted-foreground">
               The agent shows offline until it sends its first heartbeat.
             </p>
+            {created.pendingTests.length > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs space-y-1">
+                <p className="font-medium text-amber-500">
+                  Waiting on tests: {created.pendingTests.map((t) => getTaskType(t)?.label ?? t).join(", ")}
+                </p>
+                <p className="text-muted-foreground">
+                  These types unlock when your agent passes their test. Each test is already queued as a
+                  job — start your agent and it does them first. Results appear on the agent&apos;s page.
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
               <Button render={<Link href="/dashboard/worker" />} className="glow-sm">
                 Go to Worker Dashboard
@@ -264,10 +288,19 @@ node dist/runner.js -k ${created.apiKey} -s http://localhost:3000`}
                   >
                     <t.icon className={cn("h-4 w-4 shrink-0", active ? t.color : "")} />
                     <span className="truncate">{t.label}</span>
+                    {needsQualification(t.id) && (
+                      <span className="ml-auto shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-medium text-amber-500">
+                        test
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Types marked <span className="text-amber-500">test</span> unlock after your agent passes a
+              short, free test. It arrives as a job when your agent first connects and is graded automatically.
+            </p>
           </div>
 
           <div className="space-y-2">

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/agent-auth";
 import { prisma } from "@/lib/prisma";
-import { runAutoReview } from "@/lib/auto-review";
-import { getFileUrl } from "@/lib/storage";
-import { markDelivered } from "@/lib/orders/lifecycle";
+import { runAutoReview, type AutoReviewResult } from "@/lib/auto-review";
+import { getFileUrl, readFile, readFileHead } from "@/lib/storage";
+import { finishQualification, markDelivered } from "@/lib/orders/lifecycle";
+import { gradeSubmission } from "@/lib/qualification/service";
+import type { DeliveredImage } from "@/lib/qualification/grade";
+import type { QualificationSpec } from "@/lib/qualification/spec";
 import { lifecycleErrorResponse } from "@/lib/orders/http";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -63,25 +66,6 @@ export async function POST(
     return NextResponse.json({ error: `Order is ${execution.order.status}; it is not accepting deliveries` }, { status: 409 });
   }
 
-  // 2. Write output to temporary directory for auto-review
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "thepack-"));
-  
-  if (result) {
-    await fs.writeFile(path.join(tempDir, "output.md"), result);
-  }
-
-  for (const file of outputFiles) {
-    if (file.name && file.content) {
-      // Support both text content and base64-encoded binary
-      if (file.encoding === "base64") {
-        await fs.writeFile(path.join(tempDir, file.name), Buffer.from(file.content, "base64"));
-      } else {
-        await fs.writeFile(path.join(tempDir, file.name), file.content);
-      }
-    }
-  }
-
-  // If fileIds provided, also write those files to temp dir for review
   let uploadedFiles: Array<{ id: string; key: string; filename: string; contentType: string; size: number }> = [];
   if (fileIds.length > 0) {
     uploadedFiles = await prisma.file.findMany({
@@ -91,52 +75,14 @@ export async function POST(
       },
       select: { id: true, key: true, filename: true, contentType: true, size: true },
     });
-
-    // For auto-review: copy uploaded files to temp dir. For large binaries
-    // (> 2 MB, e.g. video) only fetch the first 64 KB — auto-review only
-    // checks magic bytes in the header and gets the real byte size from the
-    // File record (`fileSizes` below), so we never pull 20×50 MB into /tmp.
-    const { readFile, readFileHead } = await import("@/lib/storage");
-    for (const f of uploadedFiles) {
-      try {
-        const content = f.size > 2 * 1024 * 1024
-          ? await readFileHead(f.key, 64 * 1024)
-          : await readFile(f.key);
-        await fs.writeFile(path.join(tempDir, f.filename), content);
-      } catch {
-        // File might not exist if upload was incomplete — skip
-      }
-    }
   }
 
-  if (Object.keys(metadata).length > 0) {
-    await fs.writeFile(path.join(tempDir, "metadata.json"), JSON.stringify(metadata));
-  }
-
-  // 3. Run Auto-Review
-  const taskInputs = execution.order.task.files ?? [];
-  const mediaInputs = taskInputs.filter(
-    (f) => f.contentType.startsWith("image/") || f.contentType.startsWith("video/")
-  );
-  const fileSizes = Object.fromEntries(uploadedFiles.map((f) => [f.filename, f.size]));
-
-  const reviewResult = await runAutoReview({
-    executionId,
-    taskType: execution.order.task.type,
-    taskTitle: execution.order.task.title,
-    outputFormat: execution.order.task.outputFormat,
-    outputDir: tempDir,
-    qualityCriteria: execution.order.task.qualityCriteria as Record<string, unknown> | null,
-    expectedInputCount: mediaInputs.length,
-    fileSizes,
-  });
-
-  // 4. Clean up temp dir (best effort)
-  try {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  } catch (e) {
-    console.error("Failed to clean up temp dir", e);
-  }
+  // A capability test is graded by the platform right now and closed; it
+  // never waits for a publisher. Everything else gets the normal auto-review.
+  const task = execution.order.task;
+  const reviewResult = task.isQualification
+    ? await gradeTest(task.qualificationSpec as unknown as QualificationSpec, uploadedFiles, outputFiles)
+    : await autoReview(execution.order.task, executionId, result, outputFiles, uploadedFiles, metadata);
 
   // 5. Update Database within transaction
   try {
@@ -230,10 +176,31 @@ export async function POST(
     // Execution -> COMPLETED and Order -> REVIEW, both compare-and-set: a
     // cancelled, timed-out or disputed order can no longer be revived by a
     // late submission (it throws and the whole transaction rolls back).
-    await markDelivered(tx, { orderId: execution.orderId, executionId });
+    if (task.isQualification) {
+      await finishQualification(tx, {
+        orderId: execution.orderId,
+        executionId,
+        agentId: agent.id,
+        type: task.type,
+        passed: reviewResult.passed,
+      });
+    } else {
+      await markDelivered(tx, { orderId: execution.orderId, executionId });
+    }
   });
   } catch (e) {
     return lifecycleErrorResponse(e, "POST /api/agent-gateway/executions/[id]/submit");
+  }
+
+  if (task.isQualification) {
+    return NextResponse.json({
+      received: true,
+      capabilityTest: { type: task.type, passed: reviewResult.passed, score: reviewResult.score },
+      summary: reviewResult.passed
+        ? `${reviewResult.summary} Your agent can now take ${task.type} work.`
+        : `${reviewResult.summary} The owner can start a new test from the agent page.`,
+      checks: reviewResult.checks,
+    });
   }
 
   return NextResponse.json({
@@ -242,4 +209,94 @@ export async function POST(
     autoReviewScore: reviewResult.score,
     summary: reviewResult.summary
   });
+}
+
+type UploadedRef = { id: string; key: string; filename: string; contentType: string; size: number };
+type InlineFile = { name?: string; content?: string; encoding?: string; contentType?: string };
+
+/** Largest delivered image the grader will download. */
+const MAX_TEST_IMAGE_BYTES = 25 * 1024 * 1024;
+
+async function gradeTest(spec: QualificationSpec, uploaded: UploadedRef[], inline: InlineFile[]): Promise<AutoReviewResult> {
+  const delivered: DeliveredImage[] = [];
+  for (const f of uploaded) {
+    if (!f.contentType.startsWith("image/") || f.size > MAX_TEST_IMAGE_BYTES) continue;
+    try {
+      delivered.push({ filename: f.filename, content: await readFile(f.key) });
+    } catch {
+      // An upload that never completed; nothing to grade.
+    }
+  }
+  for (const f of inline) {
+    if (f.name && f.content && f.encoding === "base64" && /\.(png|jpe?g|webp)$/i.test(f.name)) {
+      delivered.push({ filename: f.name, content: Buffer.from(f.content, "base64") });
+    }
+  }
+  return gradeSubmission(spec, delivered);
+}
+
+async function autoReview(
+  task: { type: string; title: string; outputFormat: string | null; qualityCriteria: unknown; files: Array<{ contentType: string }> },
+  executionId: string,
+  result: string | undefined,
+  outputFiles: InlineFile[],
+  uploadedFiles: UploadedRef[],
+  metadata: Record<string, unknown>
+): Promise<AutoReviewResult> {
+  // Write output to a temporary directory for auto-review
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "thepack-"));
+
+  if (result) {
+    await fs.writeFile(path.join(tempDir, "output.md"), result);
+  }
+
+  for (const file of outputFiles) {
+    if (file.name && file.content) {
+      // Support both text content and base64-encoded binary
+      if (file.encoding === "base64") {
+        await fs.writeFile(path.join(tempDir, file.name), Buffer.from(file.content, "base64"));
+      } else {
+        await fs.writeFile(path.join(tempDir, file.name), file.content);
+      }
+    }
+  }
+
+  // Copy uploaded files to the temp dir. For large binaries (> 2 MB, e.g.
+  // video) only fetch the first 64 KB — auto-review only checks magic bytes in
+  // the header and gets the real byte size from the File record (`fileSizes`
+  // below), so we never pull 20×50 MB into /tmp.
+  for (const f of uploadedFiles) {
+    try {
+      const content = f.size > 2 * 1024 * 1024
+        ? await readFileHead(f.key, 64 * 1024)
+        : await readFile(f.key);
+      await fs.writeFile(path.join(tempDir, f.filename), content);
+    } catch {
+      // File might not exist if upload was incomplete — skip
+    }
+  }
+
+  if (Object.keys(metadata).length > 0) {
+    await fs.writeFile(path.join(tempDir, "metadata.json"), JSON.stringify(metadata));
+  }
+
+  const mediaInputs = (task.files ?? []).filter(
+    (f) => f.contentType.startsWith("image/") || f.contentType.startsWith("video/")
+  );
+  const fileSizes = Object.fromEntries(uploadedFiles.map((f) => [f.filename, f.size]));
+
+  try {
+    return await runAutoReview({
+      executionId,
+      taskType: task.type,
+      taskTitle: task.title,
+      outputFormat: task.outputFormat,
+      outputDir: tempDir,
+      qualityCriteria: task.qualityCriteria as Record<string, unknown> | null,
+      expectedInputCount: mediaInputs.length,
+      fileSizes,
+    });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch((e) => console.error("Failed to clean up temp dir", e));
+  }
 }

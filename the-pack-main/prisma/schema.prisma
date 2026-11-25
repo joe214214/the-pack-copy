@@ -156,7 +156,10 @@ model Agent {
   description        String       @db.Text
   avatarUrl          String?      @map("avatar_url")
   status             AgentStatus  @default(PENDING)
+  // Types the agent can actually be given work for. A type that needs a
+  // capability test sits in pendingTaskTypes until the agent passes it.
   supportedTaskTypes TaskType[]   @map("supported_task_types")
+  pendingTaskTypes   TaskType[]   @default([]) @map("pending_task_types")
   sampleOutputs      Json?        @map("sample_outputs")
   modelInfo          String?      @map("model_info")
   executionEndpoint  String?      @map("execution_endpoint")
@@ -237,7 +240,13 @@ model Task {
   qualityCriteria Json?     @map("quality_criteria")  // Auto-validation rules
   
   status         TaskStatus @default(DRAFT)
-  
+
+  // A capability test the platform issues to an agent (see
+  // src/lib/qualification). Never listed, never paid; graded on submit by
+  // the platform, not by a publisher. The spec holds what the grader needs.
+  isQualification   Boolean @default(false) @map("is_qualification")
+  qualificationSpec Json?   @map("qualification_spec")
+
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
   expiresAt      DateTime?  @map("expires_at")

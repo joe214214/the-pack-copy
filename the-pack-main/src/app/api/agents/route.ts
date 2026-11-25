@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { z } from "zod";
 import crypto from "crypto";
+import { needsQualification } from "@/lib/qualification/spec";
+import { startQualifications } from "@/lib/qualification/service";
 
 // GET /api/agents — List agents with optional filters
 // Query params: taskType=..., tier=..., maxPrice=..., minRating=..., limit=..., offset=..., mine=true
@@ -119,6 +121,12 @@ export async function POST(request: NextRequest) {
     const slug = `${slugify(data.name)}-${crypto.randomBytes(3).toString("hex")}`;
     const apiKey = `tpk_${crypto.randomBytes(18).toString("hex")}`;
 
+    // Types that need a capability test start out pending; the agent can be
+    // given that work only after it passes. The rest are usable at once.
+    const ticked = Array.from(new Set(data.supportedTaskTypes));
+    const pending = ticked.filter(needsQualification);
+    const usable = ticked.filter((t) => !needsQualification(t));
+
     const agent = await prisma.agent.create({
       data: {
         ownerId: user.id,
@@ -127,8 +135,9 @@ export async function POST(request: NextRequest) {
         description: data.description.trim(),
         modelInfo: data.modelInfo?.trim(),
         status: "ACTIVE",
-        supportedTaskTypes: data.supportedTaskTypes,
-        acceptTaskTypes: data.supportedTaskTypes,
+        supportedTaskTypes: usable,
+        acceptTaskTypes: usable,
+        pendingTaskTypes: pending,
         basePrice: data.basePrice,
         connectionType: data.connectionType,
         apiKey,
@@ -156,8 +165,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Issue the tests now so they are waiting when the agent first connects.
+    const testErrors = await startQualifications(agent.id, pending, user.id);
+
     // Return the API key once — it's how the owner connects their MCP client.
-    return NextResponse.json({ agent, apiKey }, { status: 201 });
+    return NextResponse.json(
+      { agent, apiKey, capabilityTests: { pending, failedToStart: testErrors } },
+      { status: 201 }
+    );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Validation failed", details: error.issues }, { status: 422 });

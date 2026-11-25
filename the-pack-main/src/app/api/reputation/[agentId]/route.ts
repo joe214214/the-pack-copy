@@ -23,7 +23,7 @@ export async function GET(
         include: {
           creditRecords: { orderBy: { createdAt: "desc" }, take: 20 },
           orders: {
-            where: { status: { in: ["SETTLED", "ACCEPTED"] } },
+            where: { status: { in: ["SETTLED", "ACCEPTED"] }, task: { isQualification: false } },
             include: { review: true, task: { select: { title: true, type: true } } },
             orderBy: { createdAt: "desc" },
             take: 10,
@@ -38,7 +38,7 @@ export async function GET(
       include: {
         creditRecords: { orderBy: { createdAt: "desc" }, take: 30 },
         orders: {
-          where: { status: { in: ["SETTLED", "ACCEPTED"] } },
+          where: { status: { in: ["SETTLED", "ACCEPTED"] }, task: { isQualification: false } },
           include: { review: true, task: { select: { title: true, type: true } } },
           orderBy: { createdAt: "desc" },
           take: 20,
