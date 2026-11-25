@@ -13,6 +13,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 import { CreditTierBadge } from "@/components/agents/credit-tier-badge";
 import { getTaskType } from "@/lib/task-types";
 import {
@@ -32,6 +42,7 @@ import {
   Plug,
   ShieldAlert,
   RefreshCw,
+  KeyRound,
 } from "lucide-react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,6 +91,9 @@ export default function AgentProfilePage() {
   const [connSaving, setConnSaving] = useState(false);
   const [connSaved, setConnSaved] = useState(false);
   const [connRefreshing, setConnRefreshing] = useState(false);
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [rotatedAt, setRotatedAt] = useState<Date | null>(null);
 
   useEffect(() => {
     const fetchAgent = async () => {
@@ -105,6 +119,28 @@ export default function AgentProfilePage() {
   }, []);
 
   const isOwner = !!(me && agent && (me.id === agent.owner?.id || me.isAdmin));
+  // Admins can manage connectors but not keys, matching the API.
+  const ownsKey = !!(me && agent && me.id === agent.owner?.id);
+
+  async function rotateKey() {
+    setRotating(true);
+    try {
+      const res = await fetch(`/api/agents/${slug}/rotate-key`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not replace the key");
+        return;
+      }
+      setRotatedAt(new Date(data.rotatedAt));
+      setAgent((prev: AgentDetail) => (prev ? { ...prev, isOnline: false } : prev));
+      setRotateOpen(false);
+      toast.success("Key replaced. The old key no longer works.");
+    } catch {
+      toast.error("Could not replace the key");
+    } finally {
+      setRotating(false);
+    }
+  }
 
   function toggleConnector(server: string) {
     setConnSel((prev) =>
@@ -589,6 +625,76 @@ export default function AgentProfilePage() {
               </CardContent>
             </Card>
           )}
+
+          {ownsKey && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-primary" />
+                  API key
+                </CardTitle>
+                <CardDescription>
+                  Your agent signs in to the platform with this key. If it may
+                  have leaked, replace it: the old one stops working at once.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {rotatedAt && (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs space-y-1.5">
+                    <p className="flex items-center gap-1.5 font-medium text-emerald-500">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Key replaced at {rotatedAt.toLocaleTimeString()}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Download the installer again from{" "}
+                      <Link href="/dashboard/worker" className="underline underline-offset-2 hover:text-foreground">
+                        Worker dashboard
+                      </Link>{" "}
+                      and run it on the computer that runs this agent. The new
+                      key is already inside it.
+                    </p>
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setRotateOpen(true)}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Replace key
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          <Dialog open={rotateOpen} onOpenChange={(open) => !rotating && setRotateOpen(open)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Replace this agent&apos;s key?</DialogTitle>
+                <DialogDescription>
+                  The current key stops working immediately. Until you re-run the
+                  installer with the new key, {agent.name} goes offline and
+                  cannot pick up or submit work.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <DialogClose render={<Button variant="outline" disabled={rotating} />}>
+                  Cancel
+                </DialogClose>
+                <Button variant="destructive" onClick={rotateKey} disabled={rotating}>
+                  {rotating ? (
+                    <>
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                      Replacing…
+                    </>
+                  ) : (
+                    "Replace key"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Card>
             <CardHeader>

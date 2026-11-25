@@ -3752,3 +3752,93 @@ figures (now all from Settlement); header balance never refreshed.
   delete orders directly — fine for a fresh dev DB, never run them on this one.
 - Payment provider (Stripe Checkout → `DEPOSIT` ledger entries) and withdrawals
   are the next pieces; the ledger already has the `DEPOSIT` kind reserved.
+
+---
+
+## 2026-11-24 — `5317414` deployed to Vercel (ledger + security fixes now live)
+
+### Pre-deploy checks (all read-only)
+- `prisma migrate diff` (live Supabase → schema at `5317414`): **empty migration**.
+  The ledger schema was already pushed on 11-16, so no DB write was needed.
+- `scripts/reconcile-ledger.ts` (run from a temp worktree of `5317414`): only the two
+  known unbacked escrows (alex 420, jordan 50). Same numbers as 11-16, so the old
+  deployment caused no new drift in between. Ledger groups balance; cached
+  balances match the ledger.
+- `tsc --noEmit` on `5317414`: clean.
+
+### Deploy
+- Vercel env (Production): added `CRON_SECRET` (type Secret);
+  `NEXT_PUBLIC_APP_URL` set to `https://the-pack-copy.vercel.app` (Config, no
+  trailing slash). Both set **before** the build, since `NEXT_PUBLIC_*` is baked in
+  at build time.
+- `mycopy` (`joe214214/the-pack-copy`): `main` 5debbc8 → `5317414` (fast-forward)
+  and `feature/integrate-revision-system` 8e86e30 → `5317414`. Vercel Production
+  tracks `main`. `origin` was already at `5317414`.
+- Vercel's new settings UI has no "Environment Variables" item in the left menu:
+  it is under Settings → Environments → Production.
+
+### Verified on https://the-pack-copy.vercel.app
+| check | result |
+|---|---|
+| GitHub commit status (Vercel) | success |
+| `/`, `/login` | 200 |
+| `/api/cron/maintenance` no header / wrong bearer | 401 / 401 (503 would mean `CRON_SECRET` missing) |
+| `/api/agents` and all 3 `/api/agents/[slug]` | 200, no `apiKey` field |
+
+### Still open
+- **Rotate every agent API key** — the old ones were publicly readable until this
+  deploy. The local `thepack` MCP entry in `~/.claude.json` and any runner
+  `-k` flags use one of them and must be updated afterwards.
+- Release the two unbacked escrows from `/admin/users` when the owner decides.
+- `DATABASE_URL` on Vercel still uses the session pooler (5432); transaction mode
+  (6543 + `?pgbouncer=true&connection_limit=1`) is the safer serverless setting.
+- Supabase legacy API keys (`anon` / `service_role`) retire in early 2027; move
+  to the `sb_publishable_…` / `sb_secret_…` keys before then.
+
+---
+
+## 2026-11-24 (later) — Agent owners can replace their agent's API key
+
+There was no way to rotate a key: it was generated once at registration
+(`POST /api/agents`) and the installer route even told owners to "Regenerate one
+first" with nothing to do it. Needed now because every key was public until
+`5317414` was deployed.
+
+### What
+- **`POST /api/agents/[slug]/rotate-key`** (new). Owner only — admins get 403,
+  same rule as `/installer`, which hands out whatever key this writes. One
+  transaction: new `tpk_<36 hex>` key, `isOnline=false` (the running worker is
+  locked out; the next heartbeat with the new key sets it back), and an
+  `agent.rotate_key` audit row. `Cache-Control: private, no-store`.
+- **The new key is not in the response and never shown on a page.** That
+  follows `components/agents/install-agent.tsx`: keys reach the owner only
+  inside a downloaded installer. After rotating, the owner re-downloads the
+  installer from the Worker dashboard and re-runs it.
+- **Agent detail page** (`/dashboard/agents/[slug]`): owner-only "API key" card
+  under Connectors with a **Replace key** button and a confirm dialog that says
+  the agent goes offline until the installer is re-run. Admins still see
+  Connectors but not this card.
+- The old key fails on the very next request: `lib/agent-auth.ts` and
+  `/api/mcp/sse` look the key up in the DB every time, and `lib/mcp/server.ts`
+  sends it as a Bearer header to the gateway on every tool call.
+
+### Verified (local dev server, live Supabase)
+| check | result |
+|---|---|
+| `tsc --noEmit`, eslint on both files | clean |
+| not logged in | 401 |
+| alex → Marco's agent | 403 `Not your agent` |
+| unknown slug | 404 |
+| GET | 405 |
+| Marco on his agent page | card + dialog render; Cancel closes, nothing written |
+| alex on Marco's agent page | no API key card |
+
+The success path (an actual rotation) was **not** run: the local `.env` points
+at the production database, so it would have replaced a real key.
+
+Housekeeping: `.next/dev/types` was stale (still referenced the
+`orders/confirm` page `5317414` removed) and made `tsc` fail; deleted, the dev
+server regenerates it. Added `.claude/launch.json` (repo root) for the preview
+server.
+
+### State: not committed.
